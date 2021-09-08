@@ -1,13 +1,12 @@
-package main
+package oldserver
 
 import (
-	"net"
-	"fmt"
 	"bufio"
-	"strings"
+	"fmt"
+	"net"
 	"os"
 	"strconv"
-	
+	"strings"
 )
 
 type Connections struct {
@@ -37,11 +36,11 @@ func PrintHostNames() {
 
 func HandleConnection(conn net.Conn, outputs chan string, conns *Connections) {
 	defer conn.Close()
-	
+
 	otherEnd := conn.RemoteAddr().String()
 
 	conns.Set(otherEnd, conn)
-	
+
 	for {
 		msg, err := bufio.NewReader(conn).ReadString('\n')
 		if err != nil {
@@ -49,7 +48,7 @@ func HandleConnection(conn net.Conn, outputs chan string, conns *Connections) {
 			delete(conns.m, otherEnd)
 			return
 		} else {
-			fmt.Print("From " + otherEnd + ": ", string(msg))
+			fmt.Print("From "+otherEnd+": ", string(msg))
 			msgString := fmt.Sprintf("%s : %s", otherEnd, string(msg))
 			outputs <- msgString
 		}
@@ -58,7 +57,7 @@ func HandleConnection(conn net.Conn, outputs chan string, conns *Connections) {
 
 func Broadcast(c chan string, conns *Connections) {
 	for {
-		msg := <- c
+		msg := <-c
 		titlemsg := strings.Title(msg)
 		for k := range conns.m {
 			conns.m[k].Write([]byte(titlemsg))
@@ -77,7 +76,7 @@ func main() {
 	defer ln.Close()
 	for {
 		fmt.Println("Listening for connections on port 18081...")
-		
+
 		conn, _ := ln.Accept()
 		fmt.Println("Got a connection...")
 		go HandleConnection(conn, outbound, conns)
