@@ -69,7 +69,7 @@ func Broadcast(c chan string, conns *Connections) {
 
 func main() {
 	PrintHostNames()
-	var conns = MakeConns()
+	conns := MakeConns()
 	outbound := make(chan string)
 	go Broadcast(outbound, conns)
 	ln, _ := net.Listen("tcp", ":18081")

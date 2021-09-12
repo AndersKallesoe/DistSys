@@ -44,8 +44,6 @@ The system should be implemented as follows:
 */
 
 var MessagesSent map[string]bool
-var outbound chan string
-var conns *Connections
 
 type Connections struct {
 	m map[string]net.Conn
@@ -62,10 +60,10 @@ func MakeConns() *Connections {
 }
 
 func HandleConnection(conn net.Conn, outputs chan string, conns *Connections) {
+
+	fmt.Println("---------------------------------------------------pre panic")
 	defer conn.Close()
-
 	otherEnd := conn.RemoteAddr().String()
-
 	conns.Set(otherEnd, conn)
 
 	for {
@@ -117,7 +115,7 @@ func send(conn net.Conn, outputs chan string, reader *bufio.Reader) {
 	}
 }
 
-func Listen() {
+func Listen(conn net.Conn, outputs chan string, conns *Connections) {
 	ln, _ := net.Listen("tcp", ":18081")
 	defer ln.Close()
 	for {
@@ -125,7 +123,7 @@ func Listen() {
 
 		conn, _ := ln.Accept()
 		fmt.Println("Got a connection...")
-		go HandleConnection(conn, outbound, conns)
+		go HandleConnection(conn, outputs, conns)
 	}
 }
 
@@ -140,30 +138,47 @@ func PrintHostNames() {
 	}
 }
 
-func main() {
-	//ask for ip and read from terminal
+//ask for ip and read from terminal
+func getIPandPort() string {
 	reader := bufio.NewReader(os.Stdin)
 	fmt.Println("Please provide IP address and port number in the format <ip>:<port>")
 	fmt.Print("> ")
 	ipAndPort, err := reader.ReadString('\n')
 	if err != nil {
-		return
+		fmt.Println("no server with <" + ipAndPort + ">")
+		return ""
 	}
+	return ipAndPort
+}
+
+func main() {
+	//print own ip and port
+	PrintHostNames()
+	ipAndPort := getIPandPort()
 
 	// create channel and list of connections
-	outbound = make(chan string)
-	conns = MakeConns()
+	reader := bufio.NewReader(os.Stdin)
+	conns := MakeConns()
+	outbound := make(chan string)
 	MessagesSent = make(map[string]bool)
 
 	//attempt to connect to ip
+
 	conn, _ := net.Dial("tcp", strings.TrimSpace(ipAndPort))
-	go HandleConnection(conn, outbound, conns)
+	fmt.Println(conn != nil)
+	if conn == nil {
+		fmt.Println("Starting new network")
+	} else {
+		fmt.Println("I call handle connection")
+		go HandleConnection(conn, outbound, conns)
+	}
+
 	go Broadcast(outbound, conns)
 
-	//print own ip and port
-	PrintHostNames()
 	//Listen for connections
-	go Listen()
+	go Listen(conn, outbound, conns)
 	go send(conn, outbound, reader)
+	for {
+	}
 
 }

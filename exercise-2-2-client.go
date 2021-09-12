@@ -1,4 +1,4 @@
-package main
+package client
 
 import (
 	"bufio"
@@ -15,7 +15,9 @@ func send(conn net.Conn, reader *bufio.Reader) {
 	for {
 		fmt.Print("> ")
 		text, _ := reader.ReadString('\n')
-		if text == "quit\n" { return }
+		if text == "quit\n" {
+			return
+		}
 		fmt.Fprintf(conn, text)
 	}
 }
@@ -23,12 +25,13 @@ func send(conn net.Conn, reader *bufio.Reader) {
 func receive(conn net.Conn) {
 	for {
 		msg, err := bufio.NewReader(conn).ReadString('\n')
-		if err != nil { return }
+		if err != nil {
+			return
+		}
 		fmt.Println("From server: " + msg)
 		fmt.Print("> ")
 	}
 }
-
 
 func main() {
 
@@ -38,8 +41,10 @@ func main() {
 	ipAndPort, err := reader.ReadString('\n')
 
 	fmt.Println("Debug: " + ipAndPort)
-	if err != nil { return }
-	
+	if err != nil {
+		return
+	}
+
 	// Attempt to connect to provided ipAndPort.
 	conn, _ = net.Dial("tcp", strings.TrimSpace(ipAndPort))
 	defer conn.Close()
@@ -47,6 +52,7 @@ func main() {
 	go send(conn, reader)
 	go receive(conn)
 
-	for {}
+	for {
+	}
 
 }
