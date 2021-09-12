@@ -116,10 +116,11 @@ func send(conn net.Conn, outputs chan string, reader *bufio.Reader) {
 }
 
 func Listen(conn net.Conn, outputs chan string, conns *Connections) {
-	ln, _ := net.Listen("tcp", ":18081")
+	ln, _ := net.Listen("tcp", ":0")
+
 	defer ln.Close()
 	for {
-		fmt.Println("Listening for connections on port 18081...")
+		fmt.Println("Listening for connections on port " + ln.Addr().String())
 
 		conn, _ := ln.Accept()
 		fmt.Println("Got a connection...")
@@ -165,7 +166,6 @@ func main() {
 	//attempt to connect to ip
 
 	conn, _ := net.Dial("tcp", strings.TrimSpace(ipAndPort))
-	fmt.Println(conn != nil)
 	if conn == nil {
 		fmt.Println("Starting new network")
 	} else {
