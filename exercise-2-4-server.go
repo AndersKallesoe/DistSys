@@ -44,7 +44,7 @@ func (n *Node) HandleConnection(conn net.Conn) {
 	n.Conns.mutex.Lock()
 	n.Conns.Set(otherEnd, conn)
 	n.Conns.mutex.Unlock()
-	n.PropagateSentMessages()
+	n.PropagateSentMessages(otherEnd)
 	for {
 		msg, err := bufio.NewReader(conn).ReadString('\n')
 		if err != nil {
@@ -111,14 +111,12 @@ func (n *Node) Listen() {
 	}
 }
 
-func (n *Node) PropagateSentMessages() {
+func (n *Node) PropagateSentMessages(otherEnd string) {
 	n.MessagesSent.mutex.Lock()
 	n.Conns.mutex.Lock()
 	for key, _ := range n.MessagesSent.messageMap {
-		for k := range n.Conns.m {
-			n.Conns.m[k].Write([]byte(key))
-			time.Sleep(10 * time.Millisecond)
-		}
+		n.Conns.m[otherEnd].Write([]byte(key))
+		time.Sleep(10 * time.Millisecond)
 	}
 	n.MessagesSent.mutex.Unlock()
 	n.Conns.mutex.Unlock()
