@@ -8,15 +8,18 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 )
 
 type Node struct {
 	MessagesSent MessagesSentStruct
+	Conns Connections
 }
 
 func mkNode() *Node {
 	n := new(Node)
 	n.MessagesSent = MessagesSentStruct{messageMap: make(map[string]bool)}
+	n.Conns = Connections{m:make(map[string]net.Conn)}
 	return n
 }
 
@@ -32,22 +35,16 @@ func (conns *Connections) Set(key string, val net.Conn) {
 	conns.m[key] = val
 }
 
-func MakeConns() *Connections {
-	conns := new(Connections)
-	conns.m = make(map[string]net.Conn)
-	return conns
-}
-
-func (n *Node) HandleConnection(conn net.Conn, outputs chan string, conns *Connections) {
+func (n *Node) HandleConnection(conn net.Conn, outputs chan string) {
 	defer conn.Close()
 	otherEnd := conn.RemoteAddr().String()
-	conns.Set(otherEnd, conn)
-	n.SendMessages(outputs)
+	n.Conns.Set(otherEnd, conn)
+	n.PropagateSentMessages()
 	for {
 		msg, err := bufio.NewReader(conn).ReadString('\n')
 		if err != nil {
 			fmt.Println("Ending session with " + otherEnd)
-			delete(conns.m, otherEnd)
+			delete(n.Conns.m, otherEnd)
 			return
 		} else {
 			//handle strings
@@ -64,11 +61,11 @@ func (n *Node) HandleConnection(conn net.Conn, outputs chan string, conns *Conne
 	}
 }
 
-func (n *Node) Broadcast(c chan string, conns *Connections) {
+func (n *Node) Broadcast(c chan string) {
 	for {
 		msg := <-c
-		for k := range conns.m {
-			conns.m[k].Write([]byte(msg))
+		for k := range n.Conns.m {
+			n.Conns.m[k].Write([]byte(msg))
 		}
 	}
 }
@@ -91,7 +88,7 @@ func (n *Node) Send(conn net.Conn, outputs chan string, reader *bufio.Reader) {
 	}
 }
 
-func (n *Node) Listen(conn net.Conn, outputs chan string, conns *Connections) {
+func (n *Node) Listen(outputs chan string) {
 	ln, _ := net.Listen("tcp", ":0")
 
 	defer ln.Close()
@@ -102,14 +99,17 @@ func (n *Node) Listen(conn net.Conn, outputs chan string, conns *Connections) {
 		conn, _ := ln.Accept()
 		fmt.Println("Got a connection...")
 		fmt.Print("> ")
-		go n.HandleConnection(conn, outputs, conns)
+		go n.HandleConnection(conn, outputs)
 	}
 }
 
-func (n *Node) SendMessages(outputs chan string) {
+func (n *Node) PropagateSentMessages() {
 	n.MessagesSent.mutex.Lock()
 	for key, _ := range n.MessagesSent.messageMap {
-		outputs <- key
+		for k := range n.Conns.m {
+			n.Conns.m[k].Write([]byte(key))
+			time.Sleep(10 * time.Millisecond)
+		}
 	}
 	n.MessagesSent.mutex.Unlock()
 }
@@ -155,8 +155,7 @@ func main() {
 	// create channel and list of connections
 
 	reader := bufio.NewReader(os.Stdin)
-	conns := MakeConns()
-	outbound := make(chan string)
+	outbound := make(chan string, 100)
 
 	//attempt to connect to ip
 
@@ -167,13 +166,13 @@ func main() {
 		return
 	} else {
 		fmt.Println("connecting to network")
-		go n.HandleConnection(conn, outbound, conns)
+		go n.HandleConnection(conn, outbound)
 	}
 
-	go n.Broadcast(outbound, conns)
+	go n.Broadcast(outbound)
 
 	//Listen for connections
-	go n.Listen(conn, outbound, conns)
+	go n.Listen(outbound)
 	go n.Send(conn, outbound, reader)
 	for {
 	}
