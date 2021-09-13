@@ -7,6 +7,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 /*
@@ -36,6 +37,8 @@ The system should be implemented as follows:
 	it to MessagesSent and then sends it on all its connections. (Remember con-
 	currency control. Probably several go-routines will access the set at the same
 	time. Make sure that does not give problems.)
+
+
 	6. Whenever a message is added to MessagesSent, also print it for the user to
 	see.
 	7. Optional: Try to ensure that if clients arrive on the network after it already
@@ -43,11 +46,15 @@ The system should be implemented as follows:
 	the network. This is not needed for full grades.
 */
 
-var MessagesSent map[string]bool
-
+type MessagesSentStruct struct {
+	messageMap map[string]bool
+	mutex      sync.Mutex
+}
 type Connections struct {
 	m map[string]net.Conn
 }
+
+var MessagesSent MessagesSentStruct
 
 func (conns *Connections) Set(key string, val net.Conn) {
 	conns.m[key] = val
@@ -72,12 +79,15 @@ func HandleConnection(conn net.Conn, outputs chan string, conns *Connections) {
 			return
 		} else {
 			//handle strings
-			if !MessagesSent[string(msg)] {
-				MessagesSent[string(msg)] = true
+			MessagesSent.mutex.Lock()
+			if !MessagesSent.messageMap[string(msg)] {
+				MessagesSent.messageMap[string(msg)] = true
 				fmt.Print(string(msg))
+				fmt.Print("> ")
 				msgString := fmt.Sprintf(string(msg))
 				outputs <- msgString
 			}
+			MessagesSent.mutex.Unlock()
 		}
 	}
 }
@@ -91,16 +101,21 @@ func Broadcast(c chan string, conns *Connections) {
 	}
 }
 
-func send(conn net.Conn, outputs chan string, reader *bufio.Reader) {
+func Send(conn net.Conn, outputs chan string, reader *bufio.Reader) {
 	for {
 		fmt.Print("> ")
 		text, _ := reader.ReadString('\n')
-		text = strings.TrimSpace(text)
-		if text == "quit" {
+		txt := strings.TrimSpace(text)
+		if txt == "quit" {
 			return
+		} else if txt == "printMap" {
+			PrintMap()
+		} else {
+			MessagesSent.mutex.Lock()
+			MessagesSent.messageMap[text] = true
+			outputs <- text
+			MessagesSent.mutex.Unlock()
 		}
-		MessagesSent[text] = true
-		outputs <- text
 	}
 }
 
@@ -108,11 +123,13 @@ func Listen(conn net.Conn, outputs chan string, conns *Connections) {
 	ln, _ := net.Listen("tcp", ":0")
 
 	defer ln.Close()
+	PrintHostNames()
+	fmt.Println("Listening for connections on port " + strings.TrimPrefix(ln.Addr().String(), "[::]"))
+	fmt.Print("> ")
 	for {
-		fmt.Println("Listening for connections on port " + ln.Addr().String())
-
 		conn, _ := ln.Accept()
 		fmt.Println("Got a connection...")
+		fmt.Print("> ")
 		go HandleConnection(conn, outputs, conns)
 	}
 }
@@ -128,8 +145,17 @@ func PrintHostNames() {
 	}
 }
 
+func PrintMap() {
+	MessagesSent.mutex.Lock()
+	defer MessagesSent.mutex.Unlock()
+	for key, _ := range MessagesSent.messageMap {
+		fmt.Println(key)
+	}
+
+}
+
 //ask for ip and read from terminal
-func getIPandPort() string {
+func GetIPandPort() string {
 	reader := bufio.NewReader(os.Stdin)
 	fmt.Println("Please provide IP address and port number in the format <ip>:<port>")
 	fmt.Print("> ")
@@ -143,14 +169,13 @@ func getIPandPort() string {
 
 func main() {
 	//print own ip and port
-	PrintHostNames()
-	ipAndPort := getIPandPort()
+	ipAndPort := GetIPandPort()
 
 	// create channel and list of connections
 	reader := bufio.NewReader(os.Stdin)
 	conns := MakeConns()
 	outbound := make(chan string)
-	MessagesSent = make(map[string]bool)
+	MessagesSent = MessagesSentStruct{messageMap: make(map[string]bool)}
 
 	//attempt to connect to ip
 
@@ -168,7 +193,7 @@ func main() {
 
 	//Listen for connections
 	go Listen(conn, outbound, conns)
-	go send(conn, outbound, reader)
+	go Send(conn, outbound, reader)
 	for {
 	}
 
