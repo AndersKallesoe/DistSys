@@ -31,6 +31,7 @@ type MessagesSentStruct struct {
 }
 type Connections struct {
 	m map[string]net.Conn
+	mutex sync.Mutex
 }
 
 func (conns *Connections) Set(key string, val net.Conn) {
@@ -40,7 +41,9 @@ func (conns *Connections) Set(key string, val net.Conn) {
 func (n *Node) HandleConnection(conn net.Conn) {
 	defer conn.Close()
 	otherEnd := conn.RemoteAddr().String()
+	n.Conns.mutex.Lock()
 	n.Conns.Set(otherEnd, conn)
+	n.Conns.mutex.Unlock()
 	n.PropagateSentMessages()
 	for {
 		msg, err := bufio.NewReader(conn).ReadString('\n')
@@ -66,9 +69,11 @@ func (n *Node) HandleConnection(conn net.Conn) {
 func (n *Node) Broadcast() {
 	for {
 		msg := <-n.Outbound
+		n.Conns.mutex.Lock()
 		for k := range n.Conns.m {
 			n.Conns.m[k].Write([]byte(msg))
 		}
+		n.Conns.mutex.Unlock()
 	}
 }
 
@@ -108,6 +113,7 @@ func (n *Node) Listen() {
 
 func (n *Node) PropagateSentMessages() {
 	n.MessagesSent.mutex.Lock()
+	n.Conns.mutex.Lock()
 	for key, _ := range n.MessagesSent.messageMap {
 		for k := range n.Conns.m {
 			n.Conns.m[k].Write([]byte(key))
@@ -115,6 +121,7 @@ func (n *Node) PropagateSentMessages() {
 		}
 	}
 	n.MessagesSent.mutex.Unlock()
+	n.Conns.mutex.Unlock()
 }
 
 func (n *Node) PrintHostNames() {
