@@ -1,4 +1,4 @@
-package oldserver
+package main
 
 import (
 	"bufio"
@@ -61,7 +61,6 @@ func Broadcast(c chan string, conns *Connections) {
 		titlemsg := strings.Title(msg)
 		for k := range conns.m {
 			conns.m[k].Write([]byte(titlemsg))
-			fmt.Printf("Sending %s to %s\n", strings.TrimSpace(msg), k)
 		}
 	}
 
