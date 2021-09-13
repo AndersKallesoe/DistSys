@@ -1,12 +1,15 @@
 package main
 
 import (
+	"fmt"
 	"testing"
 )
 
-func TestgetIPandPort(t *testing.T) {
+func TestGetIPandPort(t *testing.T) {
+	fmt.Println("Here")
 	n := mkNode()
-	n.GetIpAndPort()
+	s := n.GetIPandPort()
+	fmt.Println(s)
 }
 
 func TestSend(t *testing.T) {

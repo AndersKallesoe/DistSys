@@ -10,40 +10,6 @@ import (
 	"sync"
 )
 
-/*
-1. It runs as a command line program.
-2. When it starts up it asks for the IP address and port number of an existing
-peer on the network. If the IP address or port is invalid or no peer is found at
-the address, the client starts its own new network with only itself as member.
-3. Then the client prints its own IP address and the port on which it waits for
-connections.
-4. Then it will iteratively prompt the user for text strings.
-5. When the user types a text string at any connected client, then it will eventually
-be printed at all other clients.
-6. Only the text string should be printed, no information about who sent it.
-The system should be implemented as follows:
-	1. When a client connects to an existing peer, it will keep a TCP connection to
-	that peer.
-	2. Then the client opens its own port where it waits for incoming TCP connec-
-	tions.
-	3. All the connections will be treated the same, they will be used for both sending
-	and receiving strings.
-	4. It keeps a set of messages that it already sent. In Go you can make a set as
-	a map var MessagesSent map[string]bool. You just map the strings that
-	were sent to true. Initially all of them are set to false, so the set is initially
-	empty, as it should be.
-	5. When a string is typed by the user or a string arrives on any of its connections,
-	the client checks if it is already sent. If so, it does nothing. Otherwise it adds
-	it to MessagesSent and then sends it on all its connections. (Remember con-
-	currency control. Probably several go-routines will access the set at the same
-	time. Make sure that does not give problems.)
-	6. Whenever a message is added to MessagesSent, also print it for the user to
-	see.
-
-	7. Optional: Try to ensure that if clients arrive on the network after it already
-	started running, then they also receive the messages sent before they joined
-	the network. This is not needed for full grades.
-*/
 type Node struct {
 	MessagesSent MessagesSentStruct
 }
@@ -76,7 +42,7 @@ func (n *Node) HandleConnection(conn net.Conn, outputs chan string, conns *Conne
 	defer conn.Close()
 	otherEnd := conn.RemoteAddr().String()
 	conns.Set(otherEnd, conn)
-
+	n.SendMessages(outputs)
 	for {
 		msg, err := bufio.NewReader(conn).ReadString('\n')
 		if err != nil {
@@ -140,6 +106,14 @@ func (n *Node) Listen(conn net.Conn, outputs chan string, conns *Connections) {
 	}
 }
 
+func (n *Node) SendMessages(outputs chan string) {
+	n.MessagesSent.mutex.Lock()
+	for key, _ := range n.MessagesSent.messageMap {
+		outputs <- key
+	}
+	n.MessagesSent.mutex.Unlock()
+}
+
 func (n *Node) PrintHostNames() {
 	// _ is convention for throwing the return value away
 	name, _ := os.Hostname()
@@ -179,6 +153,7 @@ func main() {
 	ipAndPort := n.GetIPandPort()
 
 	// create channel and list of connections
+
 	reader := bufio.NewReader(os.Stdin)
 	conns := MakeConns()
 	outbound := make(chan string)
