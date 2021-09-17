@@ -96,21 +96,52 @@ func (c *Client) ConnectToNetwork() {
 	} else if err != nil {
 		return
 	} else {
-		fmt.Println("connecting to network")
+		fmt.Println("connecting to network, requesting list of peers")
+		enc := gob.NewEncoder(conn)
+		request := "Requesting Peers"
+		err := enc.Encode(&request)
+		if err != nil {
+			fmt.Println("Encode error request:", err)
+		}
 		dec := gob.NewDecoder(conn)
 		peers := []string{}
-		err := dec.Decode(&peers)
+		err = dec.Decode(&peers)
 		if err != nil {
 			fmt.Println("Decode error in list of peers:", err)
 		}
 		c.peers = append(c.peers, peers...)
-
+		conn.Close()
+		c.ConnectToPeers()
 	}
 
 }
 
 func (c *Client) ConnectToPeers() {
+	//determine which peers to connect to
+	peers := c.peers
+	if len(peers) < 12 {
+		peers = peers[:len(peers)]
+	} else {
+		peers = peers[len(peers)-11 : len(peers)]
+	}
+	fmt.Println(peers)
+	for p := range peers {
+		conn, err := net.Dial("tcp", peers[p])
+		if conn == nil {
+			fmt.Println("There was an error in connecting to: ", peers[p])
+		} else if err != nil {
+			return
+		} else {
+			enc := gob.NewEncoder(conn)
+			request := "Connection"
+			err := enc.Encode(&request)
+			if err != nil {
+				fmt.Println("Encode error request:", err)
+			}
+			c.conns.Set(conn.RemoteAddr().String(), conn)
 
+		}
+	}
 }
 
 func (c *Client) Listen() {
@@ -122,17 +153,27 @@ func (c *Client) Listen() {
 	fmt.Println("Listening for connections on: <" + IPandPort + ">")
 	c.peers = append(c.peers, IPandPort)
 	fmt.Println("peers are :", c.peers)
-
 	for {
 		conn, _ := ln.Accept()
-		fmt.Println("Got a connection, sending peers...")
-		peers := c.peers
-		enc := gob.NewEncoder(conn)
-		err := enc.Encode(peers)
+		fmt.Println("Got a connection, awaiting request...")
+		request := ""
+		dec := gob.NewDecoder(conn)
+		err := dec.Decode(&request)
 		if err != nil {
-			fmt.Println("Encode error in list of peers:", err)
+			fmt.Println("Decode error in msg:", err)
 		}
-
+		fmt.Println(request)
+		if request == "Requesting Peers" {
+			peers := c.peers
+			enc := gob.NewEncoder(conn)
+			err = enc.Encode(&peers)
+			if err != nil {
+				fmt.Println("Encode error in list of peers:", err)
+			}
+			conn.Close()
+		} else if request == "Connection" {
+			c.conns.Set(conn.RemoteAddr().String(), conn)
+		}
 	}
 }
 
