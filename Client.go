@@ -15,7 +15,6 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"strconv"
 	"strings"
 	"sync"
 )
@@ -97,17 +96,28 @@ func (c *Client) ConnectToPeer(IPAndPort string) {
 	} else {
 		fmt.Println("connecting to network")
 	}
-	PrintHostNames()
 }
 
-func PrintHostNames() {
+func (c *Client) Listen() {
+	ln, _ := net.Listen("tcp", ":0")
+	defer ln.Close()
+	IP := getIP()
+	Port := strings.TrimPrefix(ln.Addr().String(), "[::]:")
+	fmt.Println("Listening for connections on: <" + IP + ":" + Port + ">")
+	return
+	/*for {
+		conn, _ := ln.Accept()
+		fmt.Println("Got a connection...")
+	}*/
+}
+
+func getIP() string {
 	// _ is convention for throwing the return value away
 	name, _ := os.Hostname()
 	addrs, _ := net.LookupHost(name)
-	fmt.Println("Name: " + name)
-	for indx, addr := range addrs {
-		fmt.Println("Address number " + strconv.Itoa(indx) + ": " + addr)
-	}
+	IP := addrs[1]
+	fmt.Println("IP : " + IP)
+	return IP
 }
 
 func main() {
@@ -116,4 +126,8 @@ func main() {
 	// Request IP and Port to connect to
 	client.ConnectToNetwork()
 
+	go client.Listen()
+
+	for {
+	}
 }
