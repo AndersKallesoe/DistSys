@@ -12,6 +12,7 @@ package main
 */
 import (
 	"bufio"
+	"encoding/gob"
 	"fmt"
 	"net"
 	"os"
@@ -19,6 +20,7 @@ import (
 	"sync"
 )
 
+/*************/
 type Ledger struct {
 	Accounts map[string]int
 	lock     sync.Mutex
@@ -45,30 +47,34 @@ func (l *Ledger) Transaction(t *Transaction) {
 	l.Accounts[t.To] += t.Amount
 }
 
+/*********************/
+
 type Client struct {
 	ledger *Ledger
-	peers  Peers
+	peers  []string
+	conns  Conns
 }
 
 func makeClient() *Client {
 	client := new(Client)
 	client.ledger = MakeLedger()
-	client.peers = Peers{m: make(map[string]net.Conn)}
+	client.peers = []string{}
+	client.conns = Conns{m: make(map[string]net.Conn)}
 	return client
 }
 
 // Keeps a list of all Peers in the network
-type Peers struct {
+type Conns struct {
 	m     map[string]net.Conn
 	mutex sync.Mutex
 }
 
-// Add peer to the network
-func (peers *Peers) Set(key string, val net.Conn) {
-	peers.m[key] = val
+// Add connection to the network
+func (conns *Conns) Set(key string, val net.Conn) {
+	conns.m[key] = val
 }
 
-//ask for ip and read from terminal
+// Ask for <IP:Port>, read from terminal, and return it
 func (c *Client) GetIPandPort() string {
 	reader := bufio.NewReader(os.Stdin)
 	fmt.Println("Please provide IP address and port number in the format <ip>:<port>")
@@ -84,18 +90,27 @@ func (c *Client) GetIPandPort() string {
 
 func (c *Client) ConnectToNetwork() {
 	IPAndPort := c.GetIPandPort()
-	c.ConnectToPeer(IPAndPort)
-}
-
-func (c *Client) ConnectToPeer(IPAndPort string) {
-	peer, err := net.Dial("tcp", IPAndPort)
-	if peer == nil {
+	conn, err := net.Dial("tcp", IPAndPort)
+	if conn == nil {
 		fmt.Println("Starting new network")
 	} else if err != nil {
 		return
 	} else {
 		fmt.Println("connecting to network")
+		dec := gob.NewDecoder(conn)
+		peers := []string{}
+		err := dec.Decode(&peers)
+		if err != nil {
+			fmt.Println("Decode error in list of peers:", err)
+		}
+		c.peers = append(c.peers, peers...)
+
 	}
+
+}
+
+func (c *Client) ConnectToPeers() {
+
 }
 
 func (c *Client) Listen() {
@@ -103,12 +118,22 @@ func (c *Client) Listen() {
 	defer ln.Close()
 	IP := getIP()
 	Port := strings.TrimPrefix(ln.Addr().String(), "[::]:")
-	fmt.Println("Listening for connections on: <" + IP + ":" + Port + ">")
-	return
-	/*for {
+	IPandPort := IP + ":" + Port
+	fmt.Println("Listening for connections on: <" + IPandPort + ">")
+	c.peers = append(c.peers, IPandPort)
+	fmt.Println("peers are :", c.peers)
+
+	for {
 		conn, _ := ln.Accept()
-		fmt.Println("Got a connection...")
-	}*/
+		fmt.Println("Got a connection, sending peers...")
+		peers := c.peers
+		enc := gob.NewEncoder(conn)
+		err := enc.Encode(peers)
+		if err != nil {
+			fmt.Println("Encode error in list of peers:", err)
+		}
+
+	}
 }
 
 func getIP() string {
