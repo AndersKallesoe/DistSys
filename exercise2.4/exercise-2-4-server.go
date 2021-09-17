@@ -30,7 +30,7 @@ type MessagesSentStruct struct {
 	mutex      sync.Mutex
 }
 type Connections struct {
-	m map[string]net.Conn
+	m     map[string]net.Conn
 	mutex sync.Mutex
 }
 
@@ -157,11 +157,7 @@ func (n *Node) GetIPandPort() string {
 
 func main() {
 	n := mkNode()
-	//print own ip and port
 	ipAndPort := n.GetIPandPort()
-
-	// create channel and list of connections
-
 	//attempt to connect to ip
 
 	conn, err := net.Dial("tcp", strings.TrimSpace(ipAndPort))
