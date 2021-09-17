@@ -50,9 +50,10 @@ func (l *Ledger) Transaction(t *Transaction) {
 /*********************/
 
 type Client struct {
-	ledger *Ledger
-	peers  []string
-	conns  Conns
+	ledger    *Ledger
+	peers     []string
+	conns     Conns
+	IPandPort string
 }
 
 func makeClient() *Client {
@@ -93,16 +94,19 @@ func (c *Client) ConnectToNetwork() {
 	conn, err := net.Dial("tcp", IPAndPort)
 	if conn == nil {
 		fmt.Println("Starting new network")
+		c.peers = append(c.peers, c.IPandPort)
 	} else if err != nil {
 		return
 	} else {
 		fmt.Println("connecting to network, requesting list of peers")
+
 		enc := gob.NewEncoder(conn)
 		request := "Requesting Peers"
 		err := enc.Encode(&request)
 		if err != nil {
 			fmt.Println("Encode error request:", err)
 		}
+
 		dec := gob.NewDecoder(conn)
 		peers := []string{}
 		err = dec.Decode(&peers)
@@ -110,6 +114,8 @@ func (c *Client) ConnectToNetwork() {
 			fmt.Println("Decode error in list of peers:", err)
 		}
 		c.peers = append(c.peers, peers...)
+		c.peers = append(c.peers, c.IPandPort)
+		fmt.Println("peers are :", c.peers)
 		conn.Close()
 		c.ConnectToPeers()
 	}
@@ -120,11 +126,10 @@ func (c *Client) ConnectToPeers() {
 	//determine which peers to connect to
 	peers := c.peers
 	if len(peers) < 12 {
-		peers = peers[:len(peers)]
+		peers = peers[:len(peers)-1]
 	} else {
-		peers = peers[len(peers)-11 : len(peers)]
+		peers = peers[len(peers)-11 : len(peers)-1]
 	}
-	fmt.Println(peers)
 	for p := range peers {
 		conn, err := net.Dial("tcp", peers[p])
 		if conn == nil {
@@ -144,15 +149,17 @@ func (c *Client) ConnectToPeers() {
 	}
 }
 
-func (c *Client) Listen() {
+func (c *Client) StartListen() net.Listener {
 	ln, _ := net.Listen("tcp", ":0")
-	defer ln.Close()
 	IP := getIP()
 	Port := strings.TrimPrefix(ln.Addr().String(), "[::]:")
-	IPandPort := IP + ":" + Port
-	fmt.Println("Listening for connections on: <" + IPandPort + ">")
-	c.peers = append(c.peers, IPandPort)
-	fmt.Println("peers are :", c.peers)
+	c.IPandPort = IP + ":" + Port
+	fmt.Println("Listening for connections on: <" + c.IPandPort + ">")
+	return ln
+}
+
+func (c *Client) Listen(ln net.Listener) {
+	defer ln.Close()
 	for {
 		conn, _ := ln.Accept()
 		fmt.Println("Got a connection, awaiting request...")
@@ -190,9 +197,9 @@ func main() {
 	// Initialize the client
 	client := makeClient()
 	// Request IP and Port to connect to
+	ln := client.StartListen()
 	client.ConnectToNetwork()
-
-	go client.Listen()
+	go client.Listen(ln)
 
 	for {
 	}
