@@ -54,6 +54,7 @@ type Client struct {
 	peers     []string
 	conns     Conns
 	IPandPort string
+	Outbound chan struct
 }
 
 func makeClient() *Client {
@@ -102,7 +103,8 @@ func (c *Client) ConnectToNetwork() {
 
 		enc := gob.NewEncoder(conn)
 		request := "Requesting Peers"
-		err := enc.Encode(&request)
+		err := enc.EncodeValue(&request)
+		fmt.Println(request)
 		if err != nil {
 			fmt.Println("Encode error request:", err)
 		}
@@ -193,6 +195,40 @@ func getIP() string {
 	return IP
 }
 
+func (c *Client) HandleConnection(){
+	
+}
+
+func (c *Client) Broadcast() {
+	for {
+		msg := <-n.Outbound
+		n.Conns.mutex.Lock()
+		for k := range n.Conns.m {
+			n.Conns.m[k].Write([]byte(msg))
+		}
+		n.Conns.mutex.Unlock()
+	}
+}
+
+func (n *Node) Send() {
+	reader := bufio.NewReader(os.Stdin)
+	for {
+		fmt.Print("> ")
+		text, _ := reader.ReadString('\n')
+		txt := strings.TrimSpace(text)
+		if txt == "quit" {
+			return
+		} else if txt == "printMap" {
+			n.PrintLedger()
+		} else {
+			n.MessagesSent.mutex.Lock()
+			n.MessagesSent.messageMap[text] = true
+			n.Outbound <- text
+			n.MessagesSent.mutex.Unlock()
+		}
+	}
+}
+
 func main() {
 	// Initialize the client
 	client := makeClient()
@@ -200,7 +236,6 @@ func main() {
 	ln := client.StartListen()
 	client.ConnectToNetwork()
 	go client.Listen(ln)
+	Send()
 
-	for {
-	}
 }
