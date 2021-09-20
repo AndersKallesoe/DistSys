@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -241,7 +242,6 @@ func (c *Client) Listen(ln net.Listener) {
 		if err != nil {
 			fmt.Println("Decode error in msg:", err)
 		}
-		fmt.Println(msg)
 		switch msg.Msgtype {
 		case "Requesting Peers":
 			peers := Message{Peers: c.peers}
@@ -344,14 +344,15 @@ func (c *Client) RequestTransactionInfo() Transaction {
 		fmt.Println("formatting error: " + amount)
 		return Transaction{}
 	}
-
-	amt, err := strconv.Atoi(amount)
-
+	amount = strings.TrimSpace(amount)
+	fmt.Println(amount)
+	amt, err := strconv.ParseInt(amount, 10, 0)
+	fmt.Println(amt, err, reflect.TypeOf(amt))
 	if err != nil {
-		fmt.Println("formatting error: amount not an iteger")
+		fmt.Println("formatting error: amount not an integer")
 		return Transaction{}
 	}
-	return Transaction{From: from, To: to, Amount: amt, ID: c.getID()}
+	return Transaction{From: from, To: to, Amount: 10, ID: c.getID()}
 
 }
 
