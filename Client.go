@@ -28,18 +28,6 @@ type Ledger struct {
 	lock     sync.Mutex
 }
 
-func MakeLedger() *Ledger {
-	ledger := new(Ledger)
-	ledger.Accounts = make(map[string]int)
-	return ledger
-}
-
-func (c *Client) printLedger() {
-	for k, v := range c.ledger.Accounts {
-		fmt.Println("Account: " + k + " Balance: " + strconv.FormatInt(64, v))
-	}
-}
-
 type Transaction struct {
 	ID     string
 	From   string
@@ -47,15 +35,6 @@ type Transaction struct {
 	Amount int
 }
 
-func (l *Ledger) Transaction(t *Transaction) {
-	l.lock.Lock()
-	defer l.lock.Unlock()
-
-	l.Accounts[t.From] -= t.Amount
-	l.Accounts[t.To] += t.Amount
-}
-
-/*********************/
 
 type Message struct {
 	Msgtype     string
@@ -71,10 +50,37 @@ type Client struct {
 	IPandPort    string
 	index        int
 	transactions []string
+	
+}
+
+// Keeps a list of all Peers in the network
+type Conns struct {
+	m     map[string]net.Conn
+	mutex sync.Mutex
+}
+
+func MakeLedger() *Ledger {
+	ledger := new(Ledger)
+	ledger.Accounts = make(map[string]int)
+	return ledger
+}
+
+func (c *Client) printLedger() {
+	for k, v := range c.ledger.Accounts {
+		fmt.Println("Account: " + k + " Balance: " + strconv.Itoa(v))
+	}
+}
+
+func (l *Ledger) Transaction(t *Transaction) {
+	l.lock.Lock()
+	defer l.lock.Unlock()
+
+	l.Accounts[t.From] -= t.Amount
+	l.Accounts[t.To] += t.Amount
 }
 
 func (c *Client) getID() string {
-	return c.IPandPort + ":" + strconv.FormatInt(int64(c.index), 64)
+	return c.IPandPort + ":" + strconv.Itoa(c.index) + ":" + strconv.Itoa(len(c.transactions) + 1)
 }
 
 func makeClient() *Client {
@@ -85,12 +91,6 @@ func makeClient() *Client {
 	client.index = 0
 	client.transactions = []string{}
 	return client
-}
-
-// Keeps a list of all Peers in the network
-type Conns struct {
-	m     map[string]net.Conn
-	mutex sync.Mutex
 }
 
 // Add connection to the network
@@ -155,6 +155,7 @@ func (c *Client) ConnectToNetwork() {
 
 }
 
+
 func (c *Client) ConnectToPeers() {
 	//determine which peers to connect to
 	peers := c.peers
@@ -176,11 +177,11 @@ func (c *Client) ConnectToPeers() {
 			if err != nil {
 				fmt.Println("Encode error request:", err)
 			}
+			c.conns.mutex.Lock()
 			c.conns.Set(conn.RemoteAddr().String(), conn)
-
+			c.conns.mutex.Unlock()
 		}
 	}
-	//broadcast
 	c.Broadcastpresence(c.IPandPort)
 }
 
@@ -188,7 +189,7 @@ func (c *Client) Broadcastpresence(IPAndPort string) {
 
 	for k := range c.conns.m {
 		enc := gob.NewEncoder(c.conns.m[k])
-		request := Message{Msgtype: "Broadcast presence", IPandPort: IPAndPort}
+		request := Message{Msgtype: "Broadcast Presence", IPandPort: IPAndPort}
 		err := enc.Encode(request)
 		if err != nil {
 			fmt.Println("Encode error request:", err)
@@ -235,7 +236,6 @@ func (c *Client) Listen(ln net.Listener) {
 	defer ln.Close()
 	for {
 		conn, _ := ln.Accept()
-		fmt.Println("Got a connection, awaiting request...")
 		msg := Message{}
 		dec := gob.NewDecoder(conn)
 		err := dec.Decode(&msg)
@@ -250,9 +250,10 @@ func (c *Client) Listen(ln net.Listener) {
 			if err != nil {
 				fmt.Println("Encode error in list of peers:", err)
 			}
-			conn.Close()
 		case "Connection":
+			c.conns.mutex.Lock()
 			c.conns.Set(conn.RemoteAddr().String(), conn)
+			c.conns.mutex.Unlock()
 			go c.HandleConnection(conn)
 		default:
 			fmt.Println("No match case found for: " + msg.Msgtype)
@@ -265,7 +266,7 @@ func getIP() string {
 	// _ is convention for throwing the return value away
 	name, _ := os.Hostname()
 	addrs, _ := net.LookupHost(name)
-	IP := addrs[len(addrs)-2]
+	IP := addrs[len(addrs)-1]
 	fmt.Println("IP : " + IP)
 	return IP
 }
@@ -277,25 +278,23 @@ func (c *Client) HandleConnection(conn net.Conn) {
 		err := dec.Decode(&msg)
 		if err != nil {
 			fmt.Println("Encode error in broadcasting presence to network:", err)
+			conn.Close()
+			return
 		}
-		if !c.PeerExists(msg.IPandPort) {
-			c.peers = append(c.peers, msg.IPandPort)
-			c.Broadcastpresence(msg.IPandPort)
+		switch msg.Msgtype {
+			case "Broadcast Presence":
+				if !c.PeerExists(msg.IPandPort) {
+					c.peers = append(c.peers, msg.IPandPort)
+					c.Broadcastpresence(msg.IPandPort)
+				}
+			case "Broadcast Transaction":
+				transaction := msg.Transaction
+				c.BroadcastTransaction(transaction)
+			default:
+				fmt.Println("No match case found for: " + msg.Msgtype)
 		}
-
 	}
 }
-
-/*func (c *Client) Broadcast() {
-	for {
-		msg := <-n.Outbound
-		n.Conns.mutex.Lock()
-		for k := range n.Conns.m {
-			n.Conns.m[k].Write([]byte(msg))
-		}
-		n.Conns.mutex.Unlock()
-	}
-}*/
 
 func (c *Client) takeInput() {
 	reader := bufio.NewReader(os.Stdin)
@@ -346,13 +345,13 @@ func (c *Client) RequestTransactionInfo() Transaction {
 	}
 	amount = strings.TrimSpace(amount)
 	fmt.Println(amount)
-	amt, err := strconv.ParseInt(amount, 10, 0)
+	amt, err := strconv.Atoi(amount)
 	fmt.Println(amt, err, reflect.TypeOf(amt))
 	if err != nil {
 		fmt.Println("formatting error: amount not an integer")
 		return Transaction{}
 	}
-	return Transaction{From: from, To: to, Amount: 10, ID: c.getID()}
+	return Transaction{From: from, To: to, Amount: amt, ID: c.getID()}
 
 }
 
@@ -366,7 +365,7 @@ func (c *Client) PrintHostNames() {
 		fmt.Println("Address number " + strconv.Itoa(indx) + ": " + addr)
 	}
 }
-
+ 
 func main() {
 	// Initialize the client
 	client := makeClient()
@@ -374,7 +373,10 @@ func main() {
 	// Request IP and Port to connect to
 	ln := client.StartListen()
 	client.ConnectToNetwork()
+	for _, conn := range client.conns.m {
+		go client.HandleConnection(conn)
+	}
 	go client.Listen(ln)
-	client.takeInput()
-
+	go client.takeInput()
+	for {}
 }
