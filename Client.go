@@ -35,7 +35,6 @@ type Transaction struct {
 	Amount int
 }
 
-
 type Message struct {
 	Msgtype     string
 	Transaction Transaction
@@ -50,7 +49,6 @@ type Client struct {
 	IPandPort    string
 	index        int
 	transactions []string
-	
 }
 
 // Keeps a list of all Peers in the network
@@ -80,7 +78,7 @@ func (l *Ledger) Transaction(t *Transaction) {
 }
 
 func (c *Client) getID() string {
-	return c.IPandPort + ":" + strconv.Itoa(c.index) + ":" + strconv.Itoa(len(c.transactions) + 1)
+	return c.IPandPort + ":" + strconv.Itoa(c.index) + ":" + strconv.Itoa(len(c.transactions)+1)
 }
 
 func makeClient() *Client {
@@ -154,7 +152,6 @@ func (c *Client) ConnectToNetwork() {
 	}
 
 }
-
 
 func (c *Client) ConnectToPeers() {
 	//determine which peers to connect to
@@ -282,16 +279,16 @@ func (c *Client) HandleConnection(conn net.Conn) {
 			return
 		}
 		switch msg.Msgtype {
-			case "Broadcast Presence":
-				if !c.PeerExists(msg.IPandPort) {
-					c.peers = append(c.peers, msg.IPandPort)
-					c.Broadcastpresence(msg.IPandPort)
-				}
-			case "Broadcast Transaction":
-				transaction := msg.Transaction
-				c.BroadcastTransaction(transaction)
-			default:
-				fmt.Println("No match case found for: " + msg.Msgtype)
+		case "Broadcast Presence":
+			if !c.PeerExists(msg.IPandPort) {
+				c.peers = append(c.peers, msg.IPandPort)
+				c.Broadcastpresence(msg.IPandPort)
+			}
+		case "Broadcast Transaction":
+			transaction := msg.Transaction
+			c.BroadcastTransaction(transaction)
+		default:
+			fmt.Println("No match case found for: " + msg.Msgtype)
 		}
 	}
 }
@@ -365,7 +362,7 @@ func (c *Client) PrintHostNames() {
 		fmt.Println("Address number " + strconv.Itoa(indx) + ": " + addr)
 	}
 }
- 
+
 func main() {
 	// Initialize the client
 	client := makeClient()
@@ -378,5 +375,6 @@ func main() {
 	}
 	go client.Listen(ln)
 	go client.takeInput()
-	for {}
+	for {
+	}
 }
