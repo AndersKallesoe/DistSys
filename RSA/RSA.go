@@ -13,26 +13,27 @@ import (
 
 var e, d, n *big.Int
 
-func Keygen(k int) (*big.Int, *big.Int) {
+func Keygen(k int) {
 	j := k / 2
 
 	p := validPrime(j)
 	q := validPrime(k - j)
 	if p == nil || q == nil {
-		return nil, nil
+		return
 	}
+	fmt.Println("p = ", p, ", with bitwise length: ", p.BitLen())
+	fmt.Println("q = ", q, ", with bitwise length: ", q.BitLen())
 	n = big.NewInt(0)
+	n.Mul(p, q)
+	z := big.NewInt(0)
 	d = big.NewInt(0)
-	n.Mul(p.Sub(p, big.NewInt(1)), q.Sub(q, big.NewInt(1)))
+	z.Mul(p.Sub(p, big.NewInt(1)), q.Sub(q, big.NewInt(1)))
 	g := big.NewInt(3)
-	d.ModInverse(g, n)
+	d.ModInverse(g, z)
+	fmt.Println("d = ", d, ", with bitwise length: ", d.BitLen())
+	fmt.Println("n = ", n, ", with bitwise length: ", n.BitLen())
 
-	fmt.Println("p = ", p)
-	fmt.Println("q = ", q)
-	fmt.Println("d = ", d)
-	fmt.Println("n = ", n)
-
-	return p, q
+	return
 }
 
 /* finds a prime p of bitwise length k,
@@ -57,25 +58,22 @@ func validPrime(k int) *big.Int {
 }
 
 func Encrypt(m *big.Int) *big.Int {
-	fmt.Println("The original message is: ", m)
-	r := big.NewInt(0)
-	r = r.Exp(m, e, n)
-	fmt.Println("The cipher is: ", r)
-	return r
+	fmt.Println("The original message is: ", m, ", with bitwise length: ", m.BitLen())
+	c := big.NewInt(0)
+	c.Exp(m, e, n)
+	fmt.Println("The cipher is: ", c, ", with bitwise length: ", m.BitLen())
+	return c
 }
 func Decrypt(c *big.Int) *big.Int {
-	r := big.NewInt(0)
-	r = r.Exp(c, d, n)
-	fmt.Println("The decrypted message is: ", r)
-	return r
+	m := big.NewInt(0)
+	m = m.Exp(c, d, n)
+	fmt.Println("The decrypted message is: ", m, ", with bitwise length: ", m.BitLen())
+	return m
 }
 
 func main() {
 	e = big.NewInt(3)
-	p, q := Keygen(21)
-	if p == nil || q == nil {
-		return
-	}
+	Keygen(21)
 	Decrypt(Encrypt(big.NewInt(2090154)))
 
 }
