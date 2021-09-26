@@ -73,7 +73,6 @@ func Decrypt(c *big.Int) *big.Int {
 
 func main() {
 	e = big.NewInt(3)
-	Keygen(21)
-	Decrypt(Encrypt(big.NewInt(2090154)))
-
+	Keygen(13)
+	Decrypt(Encrypt(big.NewInt(4253)))
 }
