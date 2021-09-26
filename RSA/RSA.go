@@ -11,7 +11,7 @@ import (
 // d = 3^{-1} mod(p-1)(q-1)
 //gcd(3, p - 1) = gcd(3, q - 1) = 1
 
-var e *big.Int
+var e, d, n *big.Int
 
 func Keygen(k int) (*big.Int, *big.Int) {
 	j := k / 2
@@ -21,12 +21,17 @@ func Keygen(k int) (*big.Int, *big.Int) {
 	if p == nil || q == nil {
 		return nil, nil
 	}
-	n := big.NewInt(0)
-	n.Mul(p, q)
+	n = big.NewInt(0)
+	d = big.NewInt(0)
+	n.Mul(p.Sub(p, big.NewInt(1)), q.Sub(q, big.NewInt(1)))
 	g := big.NewInt(3)
-	var z big.Int
-	z.ModInverse(g, n)
-	fmt.Println(z)
+	d.ModInverse(g, n)
+
+	fmt.Println("p = ", p)
+	fmt.Println("q = ", q)
+	fmt.Println("d = ", d)
+	fmt.Println("n = ", n)
+
 	return p, q
 }
 
@@ -51,15 +56,26 @@ func validPrime(k int) *big.Int {
 	return nil
 }
 
-func Encrypt() {}
-func Decrypt() {}
+func Encrypt(m *big.Int) *big.Int {
+	fmt.Println("The original message is: ", m)
+	r := big.NewInt(0)
+	r = r.Exp(m, e, n)
+	fmt.Println("The cipher is: ", r)
+	return r
+}
+func Decrypt(c *big.Int) *big.Int {
+	r := big.NewInt(0)
+	r = r.Exp(c, d, n)
+	fmt.Println("The decrypted message is: ", r)
+	return r
+}
 
 func main() {
 	e = big.NewInt(3)
-	p, q := Keygen(9)
+	p, q := Keygen(21)
 	if p == nil || q == nil {
 		return
 	}
-	fmt.Println(p)
-	fmt.Println(q)
+	Decrypt(Encrypt(big.NewInt(2090154)))
+
 }
