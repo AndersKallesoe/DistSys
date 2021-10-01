@@ -6,9 +6,11 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"math/big"
 	"os"
+	"time"
 )
 
 // k: n = pq
@@ -16,39 +18,38 @@ import (
 // d = 3^{-1} mod(p-1)(q-1)
 //gcd(3, p - 1) = gcd(3, q - 1) = 1
 
-var e, n *big.Int
-
-func Keygen(k int) *big.Int {
+func Keygen(k int) (*big.Int, *big.Int, *big.Int) {
 	var p, q *big.Int
+	e := big.NewInt(3)
 	for i := k / 2; i < k; i++ {
-		p = validPrime(i)
-		q = validPrime(k - i)
+		p = validPrime(i, e)
+		q = validPrime(k-i, e)
 		if p != nil && q != nil && p.Cmp(q) != 0 {
 			break
 		}
 	}
 	if p == nil || q == nil {
-		return nil
+		err := errors.New("Could not find required primes")
+		panic(err)
 	}
 	//fmt.Println("p = ", p, ", with bitwise length: ", p.BitLen())
 	//fmt.Println("q = ", q, ", with bitwise length: ", q.BitLen())
-	n = big.NewInt(0)
+	n := big.NewInt(0)
 	n.Mul(p, q)
 	z := big.NewInt(0)
 	d := big.NewInt(0)
 	z.Mul(p.Sub(p, big.NewInt(1)), q.Sub(q, big.NewInt(1)))
-	g := big.NewInt(3)
-	d.ModInverse(g, z)
+	d.ModInverse(e, z)
 	//fmt.Println("d = ", d, ", with bitwise length: ", d.BitLen())
 	//fmt.Println("n = ", n, ", with bitwise length: ", n.BitLen())
 
-	return d
+	return d, e, n
 }
 
 /* finds a prime p of bitwise length k,
 checks whether the GCD of (p-1) and e is 1 and if so returns p,
 tries 100 times otherwise returns nil */
-func validPrime(k int) *big.Int {
+func validPrime(k int, e *big.Int) *big.Int {
 	var g, p *big.Int
 	var err error
 	for i := 0; i < 10; i++ {
@@ -66,7 +67,7 @@ func validPrime(k int) *big.Int {
 	return nil
 }
 
-func Encrypt(m *big.Int) *big.Int {
+func Encrypt(m *big.Int, e *big.Int, n *big.Int) *big.Int {
 	//fmt.Println("The original message is: ", m, ", with bitwise length: ", m.BitLen())
 	c := big.NewInt(0)
 	c.Exp(m, e, n)
@@ -74,7 +75,7 @@ func Encrypt(m *big.Int) *big.Int {
 	return c
 }
 
-func Decrypt(c *big.Int, d *big.Int) *big.Int {
+func Decrypt(c *big.Int, d *big.Int, n *big.Int) *big.Int {
 	m := big.NewInt(0)
 	m.Exp(c, d, n)
 	//fmt.Println("The decrypted message is: ", m, ", with bitwise length: ", m.BitLen())
@@ -129,8 +130,8 @@ func testKeygen() {
 		if err != nil {
 			panic(err)
 		}
-		d := Keygen(testnr.BitLen() + 1)
-		result := Decrypt(Encrypt(testnr), d)
+		d, e, n := Keygen(testnr.BitLen() + 1)
+		result := Decrypt(Encrypt(testnr, e, n), d, n)
 		if testnr.Cmp(result) != 0 {
 			fmt.Println("failed for testnr=", testnr, "result=", result)
 		}
@@ -149,10 +150,10 @@ func testEncryptToFile() {
 		if err != nil {
 			panic(err)
 		}
-		d := Keygen(testnr.BitLen() + 1)
+		d, e, n := Keygen(testnr.BitLen() + 1)
 		iv := EncryptToFile(key, d, "test.txt")
 		d = big.NewInt(int64(DecryptFromFile(key, iv, "test.txt")))
-		result := Decrypt(Encrypt(testnr), d)
+		result := Decrypt(Encrypt(testnr, e, n), d, n)
 		if testnr.Cmp(result) != 0 {
 			fmt.Println("failed for testnr=", testnr, "result=", result)
 		}
@@ -160,24 +161,83 @@ func testEncryptToFile() {
 	fmt.Println("if any random number between 0 and 10^18 failed it will be printed above")
 }
 
-func hash(m *big.Int) *big.Int {
+func Hash(m *big.Int) *big.Int {
 	s := sha256.Sum256(m.Bytes())
 	r := big.NewInt(0)
 	r.SetBytes(s[:])
 	return r
 }
 
-func sign(m *big.Int) *big.Int {
-	return nil
+func sign(m *big.Int, d *big.Int, n *big.Int) *big.Int {
+	s := Hash(m)
+	s = Encrypt(s, d, n)
+	return s
 }
 
-func SignAndVerify() {
+func verify(m *big.Int, s *big.Int, e *big.Int, n *big.Int) bool {
+	s = Decrypt(s, e, n)
+	s2 := Hash(m)
+	v := (s.Cmp(s2) == 0)
+	return v
+}
 
+func TestSignAndVerify() {
+
+	m := big.NewInt(42)
+	fmt.Println("m:= 42")
+	d, e, n := Keygen(256)
+	fmt.Println("RSA public and private key and modular was generated: ")
+	fmt.Println("d,e,n=", d, e, n)
+	s := sign(m, d, n)
+	fmt.Println("the sign of m was: ", s)
+	v := verify(m, s, e, n)
+	fmt.Println("the sign was decrypted, verified and found to be:", v, "for m = ", m)
+	w := big.NewInt(24)
+	fmt.Println("w:= 24")
+	v = verify(w, s, e, n)
+	fmt.Println("the sign was decrypted, verified and found to be:", v, "for w = ", w)
+}
+
+func TestHashSpeed() {
+	//generate 10000 random bytes
+	m := make([]byte, 100000)
+	_, err := rand.Read(m)
+	if err != nil {
+		panic(err)
+	}
+	// turn the bytearray into a number
+	n := big.NewInt(0)
+	n.SetBytes(m)
+	//record starttime
+	start := time.Now()
+	fmt.Println("beginning hashing")
+	//hash the number
+	h := Hash(n)
+	//record finish time
+	t := time.Now()
+	elapsed := t.Sub(start)
+	fmt.Println("finished hash", h)
+	fmt.Println("100 kB hash in :", elapsed.Microseconds(), "microSeconds")
+	s := (100000 * 1000000) / elapsed.Microseconds()
+	fmt.Println("this means that the speed of the hash was: ", s, "in bit/s")
+}
+
+func TestRSASpeed() {
+	d, _, n := Keygen(2001)
+	m := big.NewInt(42)
+	m = Hash(m)
+	start := time.Now()
+	fmt.Println("beginning encryption")
+	s := Encrypt(m, d, n)
+	//record finish time
+	t := time.Now()
+	elapsed := t.Sub(start)
+	fmt.Println("finished encryption", s)
+	fmt.Println("encypted sha-256 hash in :", elapsed.Microseconds(), "microSeconds")
 }
 
 func main() {
-	e = big.NewInt(3)
-	testKeygen()
-	testEncryptToFile()
-
+	//TestSignAndVerify()
+	//TestHashSpeed()
+	TestRSASpeed()
 }
