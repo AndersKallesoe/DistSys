@@ -198,7 +198,7 @@ func TestSignAndVerify() {
 	fmt.Println("the sign was decrypted, verified and found to be:", v, "for w = ", w)
 }
 
-func TestHashSpeed() {
+func TestHashSpeed() int {
 	//generate 10000 random bytes
 	m := make([]byte, 100000)
 	_, err := rand.Read(m)
@@ -210,34 +210,61 @@ func TestHashSpeed() {
 	n.SetBytes(m)
 	//record starttime
 	start := time.Now()
-	fmt.Println("beginning hashing")
+	//fmt.Println("beginning hashing")
 	//hash the number
-	h := Hash(n)
+	//h := Hash(n)
+	Hash(n)
 	//record finish time
 	t := time.Now()
 	elapsed := t.Sub(start)
-	fmt.Println("finished hash", h)
-	fmt.Println("100 kB hash in :", elapsed.Microseconds(), "microSeconds")
-	s := (100000 * 1000000) / elapsed.Microseconds()
-	fmt.Println("this means that the speed of the hash was: ", s, "in bit/s")
+	//fmt.Println("finished hash", h)
+	//fmt.Println("100 kB hash in :", elapsed.Microseconds(), "microSeconds")
+	//s := (100000 * 1000000) / elapsed.Microseconds()
+	//fmt.Println("this means that the speed of the hash was: ", s, "in bit/s")
+	return int(elapsed.Microseconds())
 }
 
-func TestRSASpeed() {
+func TestRSASpeed() int64 {
 	d, _, n := Keygen(2001)
 	m := big.NewInt(42)
 	m = Hash(m)
 	start := time.Now()
-	fmt.Println("beginning encryption")
-	s := Encrypt(m, d, n)
+	//fmt.Println("beginning encryption")
+	//s := Encrypt(m, d, n)
+	Encrypt(m, d, n)
 	//record finish time
 	t := time.Now()
 	elapsed := t.Sub(start)
-	fmt.Println("finished encryption", s)
-	fmt.Println("encypted sha-256 hash in :", elapsed.Microseconds(), "microSeconds")
+	//fmt.Println("finished encryption", s)
+	//fmt.Println("encypted sha-256 hash in :", elapsed.Microseconds(), "microSeconds")
+	return elapsed.Microseconds()
+}
+
+func HashSpeedAverage() int64 {
+	s := 0
+	for i := 0; i < 100; i++ {
+		s += TestHashSpeed()
+	}
+	s /= 100
+	fmt.Println("the average time of a Hash of 100 kB was:", s)
+	return int64(s)
+}
+
+func RSASpeedAverage() int64 {
+	s := big.NewInt(0)
+	for i := 0; i < 100; i++ {
+		s.Add(s, big.NewInt(TestRSASpeed()))
+	}
+	s.Div(s, big.NewInt(100))
+	fmt.Println("the average time of a RSA-encryption of a sha-256 hash was:", s)
+	return s.Int64()
 }
 
 func main() {
 	//TestSignAndVerify()
 	//TestHashSpeed()
-	TestRSASpeed()
+	//TestRSASpeed()
+	HashSpeedAverage()
+	RSASpeedAverage()
+
 }
