@@ -2,6 +2,7 @@ package main
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"fmt"
 	"math/big"
 )
@@ -71,8 +72,17 @@ func Decrypt(c *big.Int) *big.Int {
 	return m
 }
 
+func hash(m *big.Int) *big.Int {
+	s := sha256.Sum256(m.Bytes())
+	r := big.NewInt(0)
+	r.SetBytes(s[:])
+	return r
+}
+
 func main() {
-	e = big.NewInt(3)
-	Keygen(13)
-	Decrypt(Encrypt(big.NewInt(4253)))
+	m := big.NewInt(42)
+	s1 := hash(m)
+	s2 := hash(m)
+	fmt.Println(s1.Cmp(s2) == 0)
+
 }
