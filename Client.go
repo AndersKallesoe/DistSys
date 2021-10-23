@@ -12,14 +12,11 @@ package main
 */
 import (
 	"bufio"
-	"crypto/rand"
 	"encoding/gob"
-	"errors"
 	"fmt"
 	"math/big"
 	"net"
 	"os"
-	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -41,73 +38,6 @@ type Account struct {
 	signingModular  *big.Int
 }
 
-func (C *Client) makeAccount(name string) {
-	privateKey, publicKey, encodingModular, signingKey, verificationKey, signingModular := C.generateKeyset()
-	account := Account{name, privateKey, publicKey, encodingModular, signingKey, verificationKey, signingModular}
-	C.Accounts[name] = account
-}
-
-func (C *Client) addAccount(name string, acc Account) {
-
-}
-
-func (C *Client) intToString(i *big.Int) string {
-
-}
-
-func (C *Client) stringToInt(s string) *big.Int {
-
-}
-
-//generates private, public, verification and signing key for the account
-func (C *Client) generateKeyset() (*big.Int, *big.Int, *big.Int, *big.Int, *big.Int, *big.Int) {
-	ed, ee, en := Keygen(257)
-	sd, se, sn := Keygen(257)
-	return ed, ee, en, sd, se, sn
-}
-
-func Keygen(k int) (*big.Int, *big.Int, *big.Int) {
-	var p, q *big.Int
-	e := big.NewInt(3)
-	for i := k / 2; i < k; i++ {
-		p = validPrime(i, e)
-		q = validPrime(k-i, e)
-		if p != nil && q != nil && p.Cmp(q) != 0 {
-			break
-		}
-	}
-	if p == nil || q == nil {
-		err := errors.New("Could not find required primes")
-		panic(err)
-	}
-	n := big.NewInt(0)
-	n.Mul(p, q)
-	z := big.NewInt(0)
-	d := big.NewInt(0)
-	z.Mul(p.Sub(p, big.NewInt(1)), q.Sub(q, big.NewInt(1)))
-	d.ModInverse(e, z)
-
-	return d, e, n
-}
-
-func validPrime(k int, e *big.Int) *big.Int {
-	var g, p *big.Int
-	var err error
-	for i := 0; i < 10; i++ {
-		g = big.NewInt(3)
-		p, err = rand.Prime(rand.Reader, k)
-		if err != nil {
-			fmt.Println("There was an error in creating a prime")
-		}
-		g.GCD(big.NewInt(1), big.NewInt(1), g.Sub(p, big.NewInt(1)), e)
-		if g.Cmp(big.NewInt(1)) == 0 {
-			return p
-		}
-	}
-	//fmt.Println("could not find valid prime with length: ", k)
-	return nil
-}
-
 type SignedTransaction struct {
 	ID        string // Any string
 	From      string // A verification key coded as a string
@@ -117,10 +47,12 @@ type SignedTransaction struct {
 }
 
 type Message struct {
-	Msgtype     string
-	Transaction SignedTransaction
-	IPandPort   string
-	Peers       []string
+	Msgtype          string
+	Transaction      SignedTransaction
+	IPandPort        string
+	Peers            []string
+	AccountName      string
+	VerificationKeys VerificationKeySet
 }
 
 type Client struct {
@@ -130,9 +62,13 @@ type Client struct {
 	IPandPort        string
 	index            int
 	transactions     []string
-	PublicKeys       map[string]int
-	VerificationKeys map[string]int
+	VerificationKeys map[string]VerificationKeySet
 	Accounts         map[string]Account
+}
+
+type VerificationKeySet struct {
+	VerificationKey *big.Int
+	SigningModular  *big.Int
 }
 
 // Keeps a list of all Peers in the network
@@ -141,34 +77,65 @@ type Conns struct {
 	mutex sync.Mutex
 }
 
+func (C *Client) makeAccount(name string) {
+	privateKey, publicKey, encodingModular, signingKey, verificationKey, signingModular := C.generateKeyset()
+	account := Account{name, privateKey, publicKey, encodingModular, signingKey, verificationKey, signingModular}
+	encryptedName := Encrypt(name, privateKey, encodingModular)
+	verificationKeySet := VerificationKeySet{VerificationKey: verificationKey, SigningModular: signingModular}
+	C.BroadcastKeySet(encryptedName, verificationKeySet)
+	C.Accounts[name] = account
+}
+
+//generates private, public, verification and signing key for the account
+func (C *Client) generateKeyset() (*big.Int, *big.Int, *big.Int, *big.Int, *big.Int, *big.Int) {
+	ed, ee, en := Keygen(257)
+	sd, se, sn := Keygen(257)
+	return ed, ee, en, sd, se, sn
+}
+
 func MakeLedger() *Ledger {
 	ledger := new(Ledger)
 	ledger.Accounts = make(map[string]int)
 	return ledger
 }
 
-func (c *Client) printLedger() {
-	for k, v := range c.ledger.Accounts {
+func (C *Client) printLedger() {
+	for k, v := range C.ledger.Accounts {
 		fmt.Println("Account: " + k + " Balance: " + strconv.Itoa(v))
 	}
 }
 
-func (l *Ledger) SignedTransaction(t *SignedTransaction) {
-	l.lock.Lock()
-	defer l.lock.Unlock()
-	/* We verify that the t.Signature is a valid RSA
-	* signature on the rest of the fields in t under
-	* the public key t.From.
-	 */
-	validSignature := true
-	if validSignature {
-		l.Accounts[t.From] -= t.Amount
-		l.Accounts[t.To] += t.Amount
+func (C *Client) SignedTransaction(t SignedTransaction) {
+	C.ledger.lock.Lock()
+	defer C.ledger.lock.Unlock()
+	s := t.ID + t.From + t.To + strconv.Itoa(t.Amount)
+	if verify(s, t.Signature, C.VerificationKeys[t.From].VerificationKey, C.VerificationKeys[t.From].SigningModular) {
+		C.ledger.Accounts[t.From] -= t.Amount
+		C.ledger.Accounts[t.To] += t.Amount
 	}
 }
 
-func (c *Client) getID() string {
-	return c.IPandPort + ":" + strconv.Itoa(c.index) + ":" + strconv.Itoa(len(c.transactions)+1)
+func (C *Client) prepareTransaction(t *SignedTransaction) {
+	from, containsfrom := C.Accounts[t.From]
+	if !containsfrom {
+		C.makeAccount(t.From)
+		from = C.Accounts[t.From]
+	}
+	t.From = Encrypt(from.name, from.privateKey, from.encodingModular)
+
+	to, containsto := C.Accounts[t.To]
+	if !containsto {
+		C.makeAccount(t.To)
+		to = C.Accounts[t.To]
+	}
+	t.To = Encrypt(to.name, to.privateKey, to.encodingModular)
+	s := t.ID + t.From + t.To + strconv.Itoa(t.Amount)
+	t.Signature = sign(s, from.signingKey, from.signingModular)
+
+}
+
+func (C *Client) getID() string {
+	return C.IPandPort + ":" + strconv.Itoa(C.index) + ":" + strconv.Itoa(len(C.transactions)+1)
 }
 
 func makeClient() *Client {
@@ -178,6 +145,8 @@ func makeClient() *Client {
 	client.conns = Conns{m: make(map[string]net.Conn)}
 	client.index = 0
 	client.transactions = []string{}
+	client.VerificationKeys = make(map[string]VerificationKeySet)
+	client.Accounts = make(map[string]Account)
 	return client
 }
 
@@ -186,9 +155,9 @@ func (conns *Conns) Set(key string, val net.Conn) {
 	conns.m[key] = val
 }
 
-func (c *Client) PeerExists(peer string) bool {
-	for p := range c.peers {
-		if c.peers[p] == peer {
+func (C *Client) PeerExists(peer string) bool {
+	for p := range C.peers {
+		if C.peers[p] == peer {
 			return true
 		}
 	}
@@ -196,7 +165,7 @@ func (c *Client) PeerExists(peer string) bool {
 }
 
 // Ask for <IP:Port>, read from terminal, and return it
-func (c *Client) GetIPandPort() string {
+func (C *Client) GetIPandPort() string {
 	reader := bufio.NewReader(os.Stdin)
 	fmt.Println("Please provide IP address and port number in the format <ip>:<port>")
 	fmt.Print("> ")
@@ -209,19 +178,19 @@ func (c *Client) GetIPandPort() string {
 	return IPAndPort
 }
 
-func (c *Client) ConnectToNetwork() {
-	IPAndPort := c.GetIPandPort()
+func (C *Client) ConnectToNetwork() {
+	IPAndPort := C.GetIPandPort()
 	conn, err := net.Dial("tcp", IPAndPort)
 	if conn == nil {
 		fmt.Println("Starting new network")
-		c.peers = append(c.peers, c.IPandPort)
+		C.peers = append(C.peers, C.IPandPort)
 	} else if err != nil {
 		return
 	} else {
 		fmt.Println("connecting to network, requesting list of peers")
 
 		enc := gob.NewEncoder(conn)
-		request := Message{Msgtype: "Requesting Peers"}
+		request := Message{Msgtype: "Requesting Peers", Transaction: SignedTransaction{}, VerificationKeys: VerificationKeySet{}}
 		fmt.Println(request)
 		err := enc.Encode(&request)
 		if err != nil {
@@ -234,18 +203,18 @@ func (c *Client) ConnectToNetwork() {
 		if err != nil {
 			fmt.Println("Decode error in list of peers:", err)
 		}
-		c.peers = append(c.peers, msg.Peers...)
-		c.peers = append(c.peers, c.IPandPort)
-		fmt.Println("peers are :", c.peers)
+		C.peers = append(C.peers, msg.Peers...)
+		C.peers = append(C.peers, C.IPandPort)
+		fmt.Println("peers are :", C.peers)
 		conn.Close()
-		c.ConnectToPeers()
+		C.ConnectToPeers()
 	}
 
 }
 
-func (c *Client) ConnectToPeers() {
+func (C *Client) ConnectToPeers() {
 	//determine which peers to connect to
-	peers := c.peers
+	peers := C.peers
 	if len(peers) <= 11 {
 		peers = peers[:len(peers)-1]
 	} else {
@@ -264,18 +233,18 @@ func (c *Client) ConnectToPeers() {
 			if err != nil {
 				fmt.Println("Encode error request:", err)
 			}
-			c.conns.mutex.Lock()
-			c.conns.Set(conn.RemoteAddr().String(), conn)
-			c.conns.mutex.Unlock()
+			C.conns.mutex.Lock()
+			C.conns.Set(conn.RemoteAddr().String(), conn)
+			C.conns.mutex.Unlock()
 		}
 	}
-	c.Broadcastpresence(c.IPandPort)
+	C.Broadcastpresence(C.IPandPort)
 }
 
-func (c *Client) Broadcastpresence(IPAndPort string) {
+func (C *Client) Broadcastpresence(IPAndPort string) {
 
-	for k := range c.conns.m {
-		enc := gob.NewEncoder(c.conns.m[k])
+	for k := range C.conns.m {
+		enc := gob.NewEncoder(C.conns.m[k])
 		request := Message{Msgtype: "Broadcast Presence", IPandPort: IPAndPort}
 		err := enc.Encode(request)
 		if err != nil {
@@ -284,14 +253,14 @@ func (c *Client) Broadcastpresence(IPAndPort string) {
 	}
 }
 
-func (c *Client) BroadcastTransaction(t Transaction) {
-	if c.TransactionExists(t.ID) {
+func (C *Client) BroadcastTransaction(t SignedTransaction) {
+	if C.TransactionExists(t.ID) {
 		return
 	}
-	c.ledger.Transaction(&t)
-	c.transactions = append(c.transactions, t.ID)
-	for k := range c.conns.m {
-		enc := gob.NewEncoder(c.conns.m[k])
+	C.SignedTransaction(t)
+	C.transactions = append(C.transactions, t.ID)
+	for k := range C.conns.m {
+		enc := gob.NewEncoder(C.conns.m[k])
 		request := Message{Msgtype: "Broadcast Transaction", Transaction: t}
 		err := enc.Encode(request)
 		if err != nil {
@@ -300,9 +269,29 @@ func (c *Client) BroadcastTransaction(t Transaction) {
 	}
 }
 
-func (c *Client) TransactionExists(transaction string) bool {
-	for p := range c.transactions {
-		if c.transactions[p] == transaction {
+func (C *Client) BroadcastKeySet(n string, v VerificationKeySet) {
+	_, exists := C.VerificationKeys[n]
+	if exists {
+		return
+	}
+	C.VerificationKeys[n] = v
+
+	fmt.Println(C.VerificationKeys[n].VerificationKey)
+
+	for k := range C.conns.m {
+		enc := gob.NewEncoder(C.conns.m[k])
+		request := Message{Msgtype: "New Account", AccountName: n, VerificationKeys: v}
+		err := enc.Encode(request)
+		if err != nil {
+			fmt.Println("Encode error request:", err)
+		}
+	}
+
+}
+
+func (C *Client) TransactionExists(transaction string) bool {
+	for p := range C.transactions {
+		if C.transactions[p] == transaction {
 			return true
 		}
 	}
@@ -310,16 +299,16 @@ func (c *Client) TransactionExists(transaction string) bool {
 
 }
 
-func (c *Client) StartListen() net.Listener {
+func (C *Client) StartListen() net.Listener {
 	ln, _ := net.Listen("tcp", ":0")
 	IP := getIP()
 	Port := strings.TrimPrefix(ln.Addr().String(), "[::]:")
-	c.IPandPort = IP + ":" + Port
-	fmt.Println("Listening for connections on: <" + c.IPandPort + ">")
+	C.IPandPort = IP + ":" + Port
+	fmt.Println("Listening for connections on: <" + C.IPandPort + ">")
 	return ln
 }
 
-func (c *Client) Listen(ln net.Listener) {
+func (C *Client) Listen(ln net.Listener) {
 	defer ln.Close()
 	for {
 		conn, _ := ln.Accept()
@@ -331,17 +320,17 @@ func (c *Client) Listen(ln net.Listener) {
 		}
 		switch msg.Msgtype {
 		case "Requesting Peers":
-			peers := Message{Peers: c.peers}
+			peers := Message{Peers: C.peers}
 			enc := gob.NewEncoder(conn)
 			err = enc.Encode(&peers)
 			if err != nil {
 				fmt.Println("Encode error in list of peers:", err)
 			}
 		case "Connection":
-			c.conns.mutex.Lock()
-			c.conns.Set(conn.RemoteAddr().String(), conn)
-			c.conns.mutex.Unlock()
-			go c.HandleConnection(conn)
+			C.conns.mutex.Lock()
+			C.conns.Set(conn.RemoteAddr().String(), conn)
+			C.conns.mutex.Unlock()
+			go C.HandleConnection(conn)
 		default:
 			fmt.Println("No match case found for: " + msg.Msgtype)
 		}
@@ -358,7 +347,7 @@ func getIP() string {
 	return IP
 }
 
-func (c *Client) HandleConnection(conn net.Conn) {
+func (C *Client) HandleConnection(conn net.Conn) {
 	for {
 		dec := gob.NewDecoder(conn)
 		msg := Message{}
@@ -370,20 +359,25 @@ func (c *Client) HandleConnection(conn net.Conn) {
 		}
 		switch msg.Msgtype {
 		case "Broadcast Presence":
-			if !c.PeerExists(msg.IPandPort) {
-				c.peers = append(c.peers, msg.IPandPort)
-				c.Broadcastpresence(msg.IPandPort)
+			if !C.PeerExists(msg.IPandPort) {
+				C.peers = append(C.peers, msg.IPandPort)
+				C.Broadcastpresence(msg.IPandPort)
 			}
 		case "Broadcast Transaction":
 			transaction := msg.Transaction
-			c.BroadcastTransaction(transaction)
+			C.BroadcastTransaction(transaction)
+		case "New Account":
+			name := msg.AccountName
+			keyset := msg.VerificationKeys
+			C.BroadcastKeySet(name, keyset)
 		default:
 			fmt.Println("No match case found for: " + msg.Msgtype)
 		}
+
 	}
 }
 
-func (c *Client) takeInput() {
+func (C *Client) takeInput() {
 	reader := bufio.NewReader(os.Stdin)
 	for {
 		fmt.Print("> ")
@@ -392,34 +386,34 @@ func (c *Client) takeInput() {
 		if txt == "quit" {
 			return
 		} else if txt == "printLedger" {
-			c.printLedger()
+			C.printLedger()
 		} else if txt == "printPeers" {
-			fmt.Println(c.peers)
+			fmt.Println(C.peers)
 		} else if txt == "Transaction" {
-			t := c.RequestTransactionInfo()
-			c.BroadcastTransaction(t)
+			t := C.RequestTransactionInfo()
+			C.BroadcastTransaction(t)
 		}
 	}
 }
 
-func (c *Client) RequestTransactionInfo() Transaction {
+func (C *Client) RequestTransactionInfo() SignedTransaction {
 	reader := bufio.NewReader(os.Stdin)
 	fmt.Println("From: ")
 	fmt.Print("> ")
 	from, err := reader.ReadString('\n')
-
+	from = strings.TrimSpace(from)
 	if err != nil {
 		fmt.Println("formatting error: " + from)
-		return Transaction{}
+		return SignedTransaction{}
 	}
 
 	fmt.Println("To: ")
 	fmt.Print("> ")
 	to, err := reader.ReadString('\n')
-
+	to = strings.TrimSpace(to)
 	if err != nil {
 		fmt.Println("formatting error: " + to)
-		return Transaction{}
+		return SignedTransaction{}
 	}
 
 	fmt.Println("Amount ")
@@ -428,21 +422,21 @@ func (c *Client) RequestTransactionInfo() Transaction {
 
 	if err != nil {
 		fmt.Println("formatting error: " + amount)
-		return Transaction{}
+		return SignedTransaction{}
 	}
 	amount = strings.TrimSpace(amount)
-	fmt.Println(amount)
 	amt, err := strconv.Atoi(amount)
-	fmt.Println(amt, err, reflect.TypeOf(amt))
 	if err != nil {
 		fmt.Println("formatting error: amount not an integer")
-		return Transaction{}
+		return SignedTransaction{}
 	}
-	return Transaction{From: from, To: to, Amount: amt, ID: c.getID()}
+	t := SignedTransaction{ID: C.getID(), From: from, To: to, Amount: amt}
+	C.prepareTransaction(&t)
+	return t
 
 }
 
-func (c *Client) PrintHostNames() {
+func (C *Client) PrintHostNames() {
 	// _ is convention for throwing the return value away
 	name, _ := os.Hostname()
 	addrs, _ := net.LookupHost(name)
@@ -464,7 +458,5 @@ func main() {
 		go client.HandleConnection(conn)
 	}
 	go client.Listen(ln)
-	go client.takeInput()
-	for {
-	}
+	client.takeInput()
 }
