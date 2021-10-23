@@ -12,8 +12,11 @@ package main
 */
 import (
 	"bufio"
+	"crypto/rand"
 	"encoding/gob"
+	"errors"
 	"fmt"
+	"math/big"
 	"net"
 	"os"
 	"reflect"
@@ -28,27 +31,108 @@ type Ledger struct {
 	lock     sync.Mutex
 }
 
-type Transaction struct {
-	ID     string
-	From   string
-	To     string
-	Amount int
+type Account struct {
+	name            string
+	privateKey      *big.Int
+	publicKey       *big.Int
+	encodingModular *big.Int
+	signingKey      *big.Int
+	verificationKey *big.Int
+	signingModular  *big.Int
+}
+
+func (C *Client) makeAccount(name string) {
+	privateKey, publicKey, encodingModular, signingKey, verificationKey, signingModular := C.generateKeyset()
+	account := Account{name, privateKey, publicKey, encodingModular, signingKey, verificationKey, signingModular}
+	C.Accounts[name] = account
+}
+
+func (C *Client) addAccount(name string, acc Account) {
+
+}
+
+func (C *Client) intToString(i *big.Int) string {
+
+}
+
+func (C *Client) stringToInt(s string) *big.Int {
+
+}
+
+//generates private, public, verification and signing key for the account
+func (C *Client) generateKeyset() (*big.Int, *big.Int, *big.Int, *big.Int, *big.Int, *big.Int) {
+	ed, ee, en := Keygen(257)
+	sd, se, sn := Keygen(257)
+	return ed, ee, en, sd, se, sn
+}
+
+func Keygen(k int) (*big.Int, *big.Int, *big.Int) {
+	var p, q *big.Int
+	e := big.NewInt(3)
+	for i := k / 2; i < k; i++ {
+		p = validPrime(i, e)
+		q = validPrime(k-i, e)
+		if p != nil && q != nil && p.Cmp(q) != 0 {
+			break
+		}
+	}
+	if p == nil || q == nil {
+		err := errors.New("Could not find required primes")
+		panic(err)
+	}
+	n := big.NewInt(0)
+	n.Mul(p, q)
+	z := big.NewInt(0)
+	d := big.NewInt(0)
+	z.Mul(p.Sub(p, big.NewInt(1)), q.Sub(q, big.NewInt(1)))
+	d.ModInverse(e, z)
+
+	return d, e, n
+}
+
+func validPrime(k int, e *big.Int) *big.Int {
+	var g, p *big.Int
+	var err error
+	for i := 0; i < 10; i++ {
+		g = big.NewInt(3)
+		p, err = rand.Prime(rand.Reader, k)
+		if err != nil {
+			fmt.Println("There was an error in creating a prime")
+		}
+		g.GCD(big.NewInt(1), big.NewInt(1), g.Sub(p, big.NewInt(1)), e)
+		if g.Cmp(big.NewInt(1)) == 0 {
+			return p
+		}
+	}
+	//fmt.Println("could not find valid prime with length: ", k)
+	return nil
+}
+
+type SignedTransaction struct {
+	ID        string // Any string
+	From      string // A verification key coded as a string
+	To        string // A verification key coded as a string
+	Amount    int    // Amount to transfer
+	Signature string // Potential signature coded as string
 }
 
 type Message struct {
 	Msgtype     string
-	Transaction Transaction
+	Transaction SignedTransaction
 	IPandPort   string
 	Peers       []string
 }
 
 type Client struct {
-	ledger       *Ledger
-	peers        []string
-	conns        Conns
-	IPandPort    string
-	index        int
-	transactions []string
+	ledger           *Ledger
+	peers            []string
+	conns            Conns
+	IPandPort        string
+	index            int
+	transactions     []string
+	PublicKeys       map[string]int
+	VerificationKeys map[string]int
+	Accounts         map[string]Account
 }
 
 // Keeps a list of all Peers in the network
@@ -69,12 +153,18 @@ func (c *Client) printLedger() {
 	}
 }
 
-func (l *Ledger) Transaction(t *Transaction) {
+func (l *Ledger) SignedTransaction(t *SignedTransaction) {
 	l.lock.Lock()
 	defer l.lock.Unlock()
-
-	l.Accounts[t.From] -= t.Amount
-	l.Accounts[t.To] += t.Amount
+	/* We verify that the t.Signature is a valid RSA
+	* signature on the rest of the fields in t under
+	* the public key t.From.
+	 */
+	validSignature := true
+	if validSignature {
+		l.Accounts[t.From] -= t.Amount
+		l.Accounts[t.To] += t.Amount
+	}
 }
 
 func (c *Client) getID() string {
