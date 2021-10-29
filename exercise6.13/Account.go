@@ -9,22 +9,24 @@ import (
 	"strings"
 )
 
+var Accounts map[string]Account
+
 type KeyGenerator struct {
 	Accounts map[string]Account
 }
 
 type Account struct {
-	Modular         *big.Int
 	SigningKey      *big.Int
 	VerificationKey *big.Int
+	Modular         *big.Int
 }
 
 func MakeKeyGenerator() KeyGenerator {
-	return KeyGenerator{}
+	return KeyGenerator{make(map[string]Account)}
 }
 
 func (KeyGenerator *KeyGenerator) MakeAccount() Account {
-	d, e, n := GenerateKeys(42)
+	d, e, n := GenerateKeys(257)
 	acc := Account{d, e, n}
 	_, exists := KeyGenerator.Accounts[PublicKey(acc)]
 	if exists {
@@ -124,6 +126,11 @@ func sign(message string, d *big.Int, n *big.Int) string {
 func verify(m string, s string, e *big.Int, n *big.Int) bool {
 	decryptedSign := Decrypt(stringToInt(s), e, n)
 	hashedMessage := Hash(stringToInt(m))
+	/*fmt.Print("decrypted sign: ")
+	fmt.Println(decryptedSign)
+	fmt.Print("hashed Message: ")
+	fmt.Println(hashedMessage)
+	*/
 	v := (decryptedSign.Cmp(hashedMessage) == 0)
 	return v
 }

@@ -87,10 +87,22 @@ func (C *Client) SignedTransaction(t SignedTransaction) {
 	defer C.ledger.lock.Unlock()
 	s := t.ID + t.From + t.To + strconv.Itoa(t.Amount)
 	v, m := SplitPublicKey(t.From)
+	/*fmt.Print("string: ")
+	fmt.Println(s)
+	fmt.Print("signature: ")
+	fmt.Println(t.Signature)
+	fmt.Print("verification key: ")
+	fmt.Println(v)
+	fmt.Print("modular: ")
+	fmt.Println(m)*/
 	if verify(s, t.Signature, v, m) {
+		fmt.Println("verification succesful")
 		C.ledger.Accounts[t.From] -= t.Amount
 		C.ledger.Accounts[t.To] += t.Amount
+	} else {
+		fmt.Println("verification unsuccesful")
 	}
+
 }
 
 func (C *Client) getID() string {
@@ -333,10 +345,17 @@ func (C *Client) takeInput() {
 }
 
 func (C *Client) RequestTransactionInfo() SignedTransaction {
+	id := C.getID()
 	from := C.requestFrom()
 	to := C.requestTo()
 	amt := C.requestAmount()
-	t := SignedTransaction{ID: C.getID(), From: from, To: to, Amount: amt}
+
+	m := (id + from + to + strconv.Itoa(amt))
+
+	sign := sign(m, C.LocalAccounts[from].SigningKey, C.LocalAccounts[from].Modular)
+	fmt.Print("signature: ")
+	fmt.Println(sign)
+	t := SignedTransaction{ID: id, From: from, To: to, Amount: amt, Signature: sign}
 	return t
 
 }
@@ -386,13 +405,17 @@ func (C *Client) requestTo() string {
 		fmt.Println("formatting error: " + to)
 		return C.requestTo()
 	}
+	if to == "new" {
+		acc := C.addAccount()
+		return PublicKey(acc)
+	}
 	if C.validToAccount(to) {
 		return to
 	}
 	return C.requestTo()
 }
 func (C *Client) requestAmount() int {
-	fmt.Println("Amount ")
+	fmt.Println("Amount:")
 	fmt.Print("> ")
 	amount, err := C.reader.ReadString('\n')
 
@@ -420,7 +443,8 @@ func (C *Client) PrintHostNames() {
 	}
 }
 
-func runClient() {
+func main() {
+	KeyGen = MakeKeyGenerator()
 	// Initialize the client
 	client := makeClient()
 	client.PrintHostNames()
@@ -430,5 +454,6 @@ func runClient() {
 	for _, conn := range client.conns.m {
 		go client.HandleConnection(conn)
 	}
-	client.Listen(ln)
+	go client.Listen(ln)
+	client.takeInput()
 }
