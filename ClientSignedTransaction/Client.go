@@ -455,5 +455,13 @@ func main() {
 		go client.HandleConnection(conn)
 	}
 	go client.Listen(ln)
+	fmt.Println("When the client is running the following commands exist:")
+	fmt.Println("Transaction   -   start requesting info to complete a transaction")
+	fmt.Println("makeAccount   -   creates a new account and prints the id which is the public key")
+	fmt.Println("printLedger   -   prints the clients version of the ledger")
+	fmt.Println("printPeers    -   print the peers the client is connected to")
+	fmt.Println("quit          -   shut down the client")
+	fmt.Println("*******************************************************************")
 	client.takeInput()
+
 }

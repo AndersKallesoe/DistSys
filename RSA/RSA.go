@@ -270,11 +270,3 @@ func RSASpeedAverage() int64 {
 	fmt.Println("the average time of a RSA-encryption of a sha-256 hash was:", s, "microseconds")
 	return s.Int64()
 }
-
-func main() {
-	TestSignAndVerify()
-	TestHashSpeed(true)
-	TestRSASpeed(true)
-	//HashSpeedAverage()
-	//RSASpeedAverage()
-}
