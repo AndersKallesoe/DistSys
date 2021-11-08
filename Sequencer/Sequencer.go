@@ -26,9 +26,10 @@ type Client struct {
 	index               int
 	pendingTransactions *PendingTransactions
 	postedTransactions  *PostedTransactions
-	localAccounts       map[string]Account
+	LocalAccounts       map[string]Account
 	SPublicKey          string
 	SPrivateKey         string
+	lock                sync.Mutex
 }
 
 type Ledger struct {
@@ -37,7 +38,7 @@ type Ledger struct {
 }
 
 type PendingTransactions struct {
-	Transactions []SignedTransaction
+	Transactions map[string]SignedTransaction
 	lock         sync.Mutex
 }
 
@@ -86,13 +87,29 @@ type Message struct {
 func main() {
 	KeyGen = MakeKeyGenerator()
 	// Initialize the client
-	client1 := makeClient("")
-	client2 := makeClient(client1.IPandPort)
-	client3 := makeClient(client1.IPandPort)
-	client1.Broadcast(Message{Msgtype: "Phase 2"})
-	time.Sleep(time.Second * 5)
-	Test(client1, client2)
-	Test(client1, client3)
+	sequencer := makeClient("")
+	client2 := makeClient(sequencer.IPandPort)
+	client3 := makeClient(sequencer.IPandPort)
+
+	accounta := sequencer.makeAccount()
+	accountb := client2.makeAccount()
+	accountc := client3.makeAccount()
+
+	ledger := make(map[string]int)
+
+	ledger[PublicKey(accounta)] = 1000
+	ledger[PublicKey(accountb)] = 1000
+	ledger[PublicKey(accountc)] = 1000
+
+	sequencer.ledger.Accounts = ledger
+	client2.ledger.Accounts = ledger
+	client3.ledger.Accounts = ledger
+
+	go Test(client2, accountb, accounta)
+	Test(client2, accountb, accountc)
+	sequencer.printLedger()
+	client2.printLedger()
+	client3.printLedger()
 }
 
 /*Creators*/
@@ -105,7 +122,7 @@ func makeClient(IPandPort string) *Client {
 	client.index = 0
 	client.pendingTransactions = MakePendingTransactions()
 	client.postedTransactions = MakePostedTransactions()
-	client.localAccounts = make(map[string]Account)
+	client.LocalAccounts = make(map[string]Account)
 	client.reader = bufio.NewReader(os.Stdin)
 	if IPandPort == "" {
 		client.StartNetwork()
@@ -130,8 +147,31 @@ func MakePostedTransactions() *PostedTransactions {
 
 func MakePendingTransactions() *PendingTransactions {
 	p := new(PendingTransactions)
-	p.Transactions = []SignedTransaction{}
+	p.Transactions = make(map[string]SignedTransaction)
 	return p
+}
+
+func (C *Client) makeAccount() Account {
+	account := KeyGen.MakeAccount()
+	C.LocalAccounts[PublicKey(account)] = account
+	fmt.Println("new account create with publickey--> " + PublicKey(account))
+	return account
+}
+
+func (C *Client) makeTransaction(from Account, to Account, amt int) {
+	if !C.validLocalAccount(PublicKey(from)) {
+		panic("illegal transaction")
+	}
+	if !C.validToAccount(PublicKey(to)) {
+		panic("illegal transaction")
+	}
+	t := SignedTransaction{C.getID(), PublicKey(from), PublicKey(to), amt, ""}
+	sign := sign(t.ID+t.From+t.To+strconv.Itoa(t.Amount), from.SigningKey, from.Modular)
+	t.Signature = sign
+	C.pendingTransactions.lock.Lock()
+	C.pendingTransactions.Transactions[t.ID] = t
+	C.pendingTransactions.lock.Unlock()
+	C.Broadcast(Message{Msgtype: "Broadcast Transaction", Transaction: t})
 }
 
 /*Threads*/
@@ -143,7 +183,7 @@ func (C *Client) StartNetwork() {
 	d, e, n := GenerateKeys(257)
 	C.SPublicKey = KeyToString(e, n)
 	C.SPrivateKey = KeyToString(d, n)
-	go C.ManageBlocks()
+	go C.CreateBlocks()
 	C.Listen(ln)
 }
 
@@ -237,6 +277,8 @@ func (C *Client) ConnectToPeers() {
 }
 
 func (C *Client) HandleConnection(conn net.Conn) {
+	blocknr := 0
+
 	for {
 		dec := gob.NewDecoder(conn)
 		msg := Message{}
@@ -253,16 +295,20 @@ func (C *Client) HandleConnection(conn net.Conn) {
 			}
 		case "Broadcast Transaction":
 			transaction := msg.Transaction
-			if C.TransactionExists(transaction) {
+			if C.TransactionExists(transaction.ID) {
 				C.pendingTransactions.lock.Lock()
-				C.pendingTransactions.Transactions = append(C.pendingTransactions.Transactions, transaction)
+				C.pendingTransactions.Transactions[transaction.ID] = transaction
 				C.pendingTransactions.lock.Unlock()
 				C.Broadcast(Message{Msgtype: "BroadCast Transaction", Transaction: transaction})
 			}
 		case "Broadcast Block":
-			//
 			block := msg.Block
-			C.Broadcast(Message{Msgtype: "BroadCast Block", Block: block})
+			if block.BlockNumber == blocknr {
+				C.Broadcast(Message{Msgtype: "BroadCast Block", Block: block})
+				C.PostBlock(block)
+			} else if block.BlockNumber > blocknr {
+				panic("A block was recieved out of order")
+			}
 		default:
 			C.PrintFromClient("No match case found for: " + msg.Msgtype)
 		}
@@ -270,31 +316,33 @@ func (C *Client) HandleConnection(conn net.Conn) {
 	}
 }
 
-func (C *Client) ManageBlocks() {
-	blocknr := -1
-	for {
-		time.Sleep(time.Second * 10)
-		blocknr++
-		transactions := []string{}
-		C.pendingTransactions.lock.Lock()
-
-		for t := range C.pendingTransactions.Transactions {
-			st := C.pendingTransactions.Transactions[t]
-			C.PostTransaction(st)
-			transactions = append(transactions, st.ID)
-		}
-
-	}
-
-	// broadcast block
-}
-
 /* Test */
-func Test(C1 *Client, C2 *Client) {
-
+func Test(C *Client, from Account, to Account) {
+	for i := 0; i < 1000; i++ {
+		C.lock.Lock()
+		C.makeTransaction(from, to, 1)
+		C.lock.Unlock()
+	}
 }
 
 /*Helper functions*/
+
+func (C *Client) printLedger() {
+	for k, v := range C.ledger.Accounts {
+		fmt.Println("Account: " + k + " Balance: " + strconv.Itoa(v))
+	}
+}
+
+func (C *Client) validLocalAccount(from string) bool {
+	_, contains := C.LocalAccounts[from]
+	return contains
+}
+
+func (C *Client) validToAccount(to string) bool {
+	_, exists := C.ledger.Accounts[to]
+	local := C.validLocalAccount(to)
+	return exists || local
+}
 
 func (C *Client) Broadcast(m Message) {
 	for k := range C.conns.m {
@@ -316,18 +364,65 @@ func (C *Client) StartListen() net.Listener {
 }
 
 func (C *Client) PostTransaction(t SignedTransaction) {
-
+	C.ledger.lock.Lock()
+	defer C.ledger.lock.Unlock()
+	s := t.ID + t.From + t.To + strconv.Itoa(t.Amount)
+	v, m := SplitPublicKey(t.From)
+	if !verify(s, t.Signature, v, m) {
+		C.PrintFromClient("signature invalid on transaction: " + t.ID)
+		return
+	}
+	if !(C.ledger.Accounts[t.From]-t.Amount >= 0) {
+		C.PrintFromClient("amount to large on transaction: " + t.ID)
+		return
+	}
+	C.ledger.Accounts[t.From] -= t.Amount
+	C.ledger.Accounts[t.To] += t.Amount
 }
 
-func (C *Client) TransactionExists(transaction SignedTransaction) bool {
+func (C *Client) CreateBlocks() {
+	blocknr := -1
+	for {
+		time.Sleep(time.Second * 10)
+		blocknr++
+		transactions := []string{}
+		C.pendingTransactions.lock.Lock()
+		for t := range C.pendingTransactions.Transactions {
+			st := C.pendingTransactions.Transactions[t]
+			C.PostTransaction(st)
+			transactions = append(transactions, st.ID)
+		}
+		C.pendingTransactions.Transactions = make(map[string]SignedTransaction)
+		C.pendingTransactions.lock.Unlock()
+		C.Broadcast(Message{Msgtype: "Broadcast Block", Block: Block{blocknr, transactions}})
+	}
+}
+
+func (C *Client) PostBlock(block Block) {
+	//verify block
+	for b := range block.IDList {
+		id := block.IDList[b]
+		for C.TransactionExists(id) {
+			time.Sleep(time.Second)
+		}
+		C.pendingTransactions.lock.Lock()
+		transaction := C.pendingTransactions.Transactions[id]
+		C.pendingTransactions.lock.Unlock()
+		C.PostTransaction(transaction)
+	}
+}
+
+func (C *Client) TransactionExists(transaction string) bool {
+	C.postedTransactions.lock.Lock()
 	for p := range C.postedTransactions.Transactions {
-		if C.postedTransactions.Transactions[p] == transaction.ID {
+		if C.postedTransactions.Transactions[p] == transaction {
 			return true
 		}
 	}
+	C.postedTransactions.lock.Unlock()
 	C.pendingTransactions.lock.Lock()
 	for p := range C.pendingTransactions.Transactions {
-		if C.pendingTransactions.Transactions[p].ID == transaction.ID {
+		if C.pendingTransactions.Transactions[p].ID == transaction {
 			return true
 		}
 	}
@@ -348,7 +443,7 @@ func getIP() string {
 }
 
 func (C *Client) PrintFromClient(s string) {
-	fmt.Println(C.getID() + " --> " + s)
+	fmt.Println(C.IPandPort + " --> " + s)
 }
 
 func (C *Client) getID() string {
