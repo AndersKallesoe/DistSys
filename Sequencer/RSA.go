@@ -40,6 +40,10 @@ func PublicKey(acc Account) string {
 	return intToString(acc.VerificationKey) + ":" + intToString(acc.Modular)
 }
 
+func KeyToString(v *big.Int, m *big.Int) string {
+	return intToString(v) + ":" + intToString(m)
+}
+
 func SplitPublicKey(pk string) (*big.Int, *big.Int) {
 	s := strings.Split(pk, ":")
 	if len(s) != 2 {
