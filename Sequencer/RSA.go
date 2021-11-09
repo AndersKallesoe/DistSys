@@ -47,6 +47,8 @@ func KeyToString(v *big.Int, m *big.Int) string {
 func SplitPublicKey(pk string) (*big.Int, *big.Int) {
 	s := strings.Split(pk, ":")
 	if len(s) != 2 {
+		fmt.Print("PublicKey: ")
+		fmt.Println(pk)
 		panic("Error: there was an error in splitting a public key")
 	}
 	return stringToInt(s[0]), stringToInt(s[1])

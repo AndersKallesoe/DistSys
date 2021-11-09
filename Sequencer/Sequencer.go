@@ -1,10 +1,8 @@
 package main
 
 import (
-	"bufio"
 	"encoding/gob"
 	"fmt"
-	"math/big"
 	"net"
 	"os"
 	"strconv"
@@ -21,7 +19,6 @@ type Client struct {
 	ledger              *Ledger
 	peers               []string
 	conns               Conns
-	reader              *bufio.Reader
 	IPandPort           string
 	index               int
 	pendingTransactions *PendingTransactions
@@ -55,15 +52,16 @@ type SignedTransaction struct {
 	Signature string // Signature coded as string
 }
 
-type KeySet struct {
-	VerificationKey *big.Int
-	SigningKey      *big.Int
-	Modular         *big.Int
+type Conns struct {
+	m map[string]GobConn
+
+	mutex sync.Mutex
 }
 
-type Conns struct {
-	m     map[string]net.Conn
-	mutex sync.Mutex
+type GobConn struct {
+	conn net.Conn
+	enc  *gob.Encoder
+	dec  *gob.Decoder
 }
 
 type Block struct {
@@ -77,7 +75,6 @@ type Message struct {
 	IPandPort   string
 	Peers       []string
 	AccountName string
-	KeySet      KeySet
 	SPublicKey  string
 	Block       Block
 }
@@ -87,9 +84,15 @@ type Message struct {
 func main() {
 	KeyGen = MakeKeyGenerator()
 	// Initialize the client
-	sequencer := makeClient("")
-	client2 := makeClient(sequencer.IPandPort)
-	client3 := makeClient(sequencer.IPandPort)
+	sequencer := makeClient()
+	fmt.Println("Sequencer made!")
+	go sequencer.StartNetwork()
+	time.Sleep(time.Second) //give the system a second to catch up
+	client2 := makeClient()
+	go client2.ConnectToNetwork(sequencer.IPandPort)
+	time.Sleep(time.Second) //give the system a second to catch up
+	client3 := makeClient()
+	go client3.ConnectToNetwork(sequencer.IPandPort)
 
 	accounta := sequencer.makeAccount()
 	accountb := client2.makeAccount()
@@ -102,34 +105,33 @@ func main() {
 	ledger[PublicKey(accountc)] = 1000
 
 	sequencer.ledger.Accounts = ledger
-	client2.ledger.Accounts = ledger
-	client3.ledger.Accounts = ledger
 
+	client2.ledger.Accounts = ledger
+
+	client3.ledger.Accounts = ledger
+	time.Sleep(time.Second) //give the system a second to catch up
+	fmt.Println("running tests")
 	go Test(client2, accountb, accounta)
 	Test(client2, accountb, accountc)
+	fmt.Println("Sequencer ledger:")
 	sequencer.printLedger()
+	fmt.Println("Client2 ledger:")
 	client2.printLedger()
+	fmt.Println("Client3 ledger:")
 	client3.printLedger()
 }
 
 /*Creators*/
 
-func makeClient(IPandPort string) *Client {
+func makeClient() *Client {
 	client := new(Client)
 	client.ledger = MakeLedger()
 	client.peers = []string{}
-	client.conns = Conns{m: make(map[string]net.Conn)}
+	client.conns = Conns{m: make(map[string]GobConn)}
 	client.index = 0
 	client.pendingTransactions = MakePendingTransactions()
 	client.postedTransactions = MakePostedTransactions()
 	client.LocalAccounts = make(map[string]Account)
-	client.reader = bufio.NewReader(os.Stdin)
-	if IPandPort == "" {
-		client.StartNetwork()
-	} else {
-		client.ConnectToNetwork(IPandPort)
-	}
-
 	return client
 }
 
@@ -171,7 +173,8 @@ func (C *Client) makeTransaction(from Account, to Account, amt int) {
 	C.pendingTransactions.lock.Lock()
 	C.pendingTransactions.Transactions[t.ID] = t
 	C.pendingTransactions.lock.Unlock()
-	C.Broadcast(Message{Msgtype: "Broadcast Transaction", Transaction: t})
+	//C.PrintFromClient("broadcasting transaction")
+	C.Broadcast(Message{Msgtype: "Broadcast Transaction", Transaction: t, Block: Block{}})
 }
 
 /*Threads*/
@@ -195,7 +198,7 @@ func (C *Client) ConnectToNetwork(IPAndPort string) {
 		panic(err)
 	} else {
 		enc := gob.NewEncoder(conn)
-		request := Message{Msgtype: "Requesting Peers"}
+		request := Message{Msgtype: "Requesting Peers", Transaction: SignedTransaction{}, Block: Block{}}
 		err := enc.Encode(&request)
 		if err != nil {
 			panic(err)
@@ -211,14 +214,18 @@ func (C *Client) ConnectToNetwork(IPAndPort string) {
 		C.peers = append(C.peers, C.IPandPort)
 		C.SPublicKey = msg.SPublicKey
 		conn.Close()
-		C.Listen(ln)
 		C.ConnectToPeers()
+		for _, conn := range C.conns.m {
+			go C.HandleConnection(conn)
+		}
+		C.Listen(ln)
 	}
 
 }
 
 func (C *Client) Listen(ln net.Listener) {
 	defer ln.Close()
+	//fmt.Println("i listen")
 	for {
 		conn, _ := ln.Accept()
 		msg := Message{}
@@ -229,7 +236,7 @@ func (C *Client) Listen(ln net.Listener) {
 		}
 		switch msg.Msgtype {
 		case "Requesting Peers":
-			peers := Message{Peers: C.peers, SPublicKey: C.SPublicKey}
+			peers := Message{Peers: C.peers, SPublicKey: C.SPublicKey, Transaction: SignedTransaction{}, Block: Block{}}
 			enc := gob.NewEncoder(conn)
 			err = enc.Encode(&peers)
 			if err != nil {
@@ -239,7 +246,7 @@ func (C *Client) Listen(ln net.Listener) {
 			C.conns.mutex.Lock()
 			C.conns.Set(conn.RemoteAddr().String(), conn)
 			C.conns.mutex.Unlock()
-			go C.HandleConnection(conn)
+			go C.HandleConnection(C.conns.m[conn.RemoteAddr().String()])
 		default:
 			fmt.Println("No match case found for: " + msg.Msgtype)
 		}
@@ -258,12 +265,11 @@ func (C *Client) ConnectToPeers() {
 	for p := range peers {
 		conn, err := net.Dial("tcp", peers[p])
 		if conn == nil {
-			C.PrintFromClient("There was an error in connecting to: " + peers[p])
 		} else if err != nil {
 			return
 		} else {
 			enc := gob.NewEncoder(conn)
-			request := Message{Msgtype: "Connection"}
+			request := Message{Msgtype: "Connection", Transaction: SignedTransaction{}, Block: Block{}}
 			err := enc.Encode(request)
 			if err != nil {
 				panic(err)
@@ -273,39 +279,60 @@ func (C *Client) ConnectToPeers() {
 			C.conns.mutex.Unlock()
 		}
 	}
-	C.Broadcast(Message{Msgtype: "Broadcast Presence"})
+	C.Broadcast(Message{Msgtype: "Broadcast Presence", IPandPort: C.IPandPort, Transaction: SignedTransaction{}, Block: Block{}})
 }
 
-func (C *Client) HandleConnection(conn net.Conn) {
+func (C *Client) HandleConnection(gc GobConn) {
 	blocknr := 0
+	fmt.Print("handling connection between: ")
+	fmt.Print(gc.conn.LocalAddr())
+	fmt.Print(" and ")
+	fmt.Println(gc.conn.RemoteAddr())
 
 	for {
-		dec := gob.NewDecoder(conn)
+		dec := gc.dec
+		/*var receivedData string
+		if err := dec.Decode(&receivedData); err != nil {
+			// handle error
+		}
+		finalData := strings.Split(receivedData, " ")
 		msg := Message{}
-		err := dec.Decode(&msg)
-		if err != nil {
-			conn.Close()
+
+		if finalData[0] == "newblock" {
+			if err := dec.Decode(&msg); err != nil {
+				panic(err)
+			}
+		} else {
+			fmt.Print("finalData: ")
+			fmt.Println(finalData)
+			fmt.Print("receivedData: ")
+			fmt.Println(receivedData)
+			panic("error in decoding" + finalData[0])
+		}*/
+		msg := Message{}
+		if err := dec.Decode(&msg); err != nil {
 			panic(err)
 		}
 		switch msg.Msgtype {
 		case "Broadcast Presence":
 			if !C.PeerExists(msg.IPandPort) {
 				C.peers = append(C.peers, msg.IPandPort)
-				C.Broadcast(Message{Msgtype: "Broadcast Presence"})
+				C.Broadcast(msg)
 			}
 		case "Broadcast Transaction":
 			transaction := msg.Transaction
-			if C.TransactionExists(transaction.ID) {
+			if !C.TransactionExists(transaction.ID) {
 				C.pendingTransactions.lock.Lock()
 				C.pendingTransactions.Transactions[transaction.ID] = transaction
 				C.pendingTransactions.lock.Unlock()
-				C.Broadcast(Message{Msgtype: "BroadCast Transaction", Transaction: transaction})
+				C.Broadcast(Message{Msgtype: "Broadcast Transaction", Transaction: transaction, Block: Block{}})
 			}
 		case "Broadcast Block":
 			block := msg.Block
 			if block.BlockNumber == blocknr {
-				C.Broadcast(Message{Msgtype: "BroadCast Block", Block: block})
 				C.PostBlock(block)
+				blocknr++
+				C.Broadcast(Message{Msgtype: "Broadcast Block", Transaction: SignedTransaction{}, Block: block})
 			} else if block.BlockNumber > blocknr {
 				panic("A block was recieved out of order")
 			}
@@ -319,6 +346,7 @@ func (C *Client) HandleConnection(conn net.Conn) {
 /* Test */
 func Test(C *Client, from Account, to Account) {
 	for i := 0; i < 1000; i++ {
+		time.Sleep(time.Millisecond)
 		C.lock.Lock()
 		C.makeTransaction(from, to, 1)
 		C.lock.Unlock()
@@ -346,9 +374,10 @@ func (C *Client) validToAccount(to string) bool {
 
 func (C *Client) Broadcast(m Message) {
 	for k := range C.conns.m {
-		enc := gob.NewEncoder(C.conns.m[k])
-		err := enc.Encode(m)
-		if err != nil {
+		/*if err := C.conns.m[k].enc.Encode("newblock add "); err != nil {
+			panic(err)
+		}*/
+		if err := C.conns.m[k].enc.Encode(&m); err != nil {
 			panic(err)
 		}
 	}
@@ -373,7 +402,7 @@ func (C *Client) PostTransaction(t SignedTransaction) {
 		return
 	}
 	if !(C.ledger.Accounts[t.From]-t.Amount >= 0) {
-		C.PrintFromClient("amount to large on transaction: " + t.ID)
+		//C.PrintFromClient("amount to large on transaction: " + t.ID) too many prints
 		return
 	}
 	C.ledger.Accounts[t.From] -= t.Amount
@@ -387,6 +416,7 @@ func (C *Client) CreateBlocks() {
 		blocknr++
 		transactions := []string{}
 		C.pendingTransactions.lock.Lock()
+		C.PrintFromClient("Sequencer now in CreateBlocks method!")
 		for t := range C.pendingTransactions.Transactions {
 			st := C.pendingTransactions.Transactions[t]
 			C.PostTransaction(st)
@@ -394,7 +424,8 @@ func (C *Client) CreateBlocks() {
 		}
 		C.pendingTransactions.Transactions = make(map[string]SignedTransaction)
 		C.pendingTransactions.lock.Unlock()
-		C.Broadcast(Message{Msgtype: "Broadcast Block", Block: Block{blocknr, transactions}})
+		C.Broadcast(Message{Msgtype: "Broadcast Block", Transaction: SignedTransaction{}, Block: Block{blocknr, transactions}})
+		C.PrintFromClient("Block made and broadcast!")
 	}
 }
 
@@ -402,36 +433,39 @@ func (C *Client) PostBlock(block Block) {
 	//verify block
 	for b := range block.IDList {
 		id := block.IDList[b]
-		for C.TransactionExists(id) {
-			time.Sleep(time.Second)
+		for !C.TransactionExists(id) {
+			time.Sleep(time.Microsecond)
 		}
 		C.pendingTransactions.lock.Lock()
 		transaction := C.pendingTransactions.Transactions[id]
 		C.pendingTransactions.lock.Unlock()
 		C.PostTransaction(transaction)
+
 	}
+	C.PrintFromClient("Block posted")
 }
 
 func (C *Client) TransactionExists(transaction string) bool {
 	C.postedTransactions.lock.Lock()
+	defer C.postedTransactions.lock.Unlock()
 	for p := range C.postedTransactions.Transactions {
 		if C.postedTransactions.Transactions[p] == transaction {
 			return true
 		}
 	}
-	C.postedTransactions.lock.Unlock()
+
 	C.pendingTransactions.lock.Lock()
+	defer C.pendingTransactions.lock.Unlock()
 	for p := range C.pendingTransactions.Transactions {
 		if C.pendingTransactions.Transactions[p].ID == transaction {
 			return true
 		}
 	}
-	C.pendingTransactions.lock.Unlock()
 	return false
 }
 
 func (conns *Conns) Set(key string, val net.Conn) {
-	conns.m[key] = val
+	conns.m[key] = GobConn{val, gob.NewEncoder(val), gob.NewDecoder(val)}
 }
 
 func getIP() string {
@@ -448,7 +482,7 @@ func (C *Client) PrintFromClient(s string) {
 
 func (C *Client) getID() string {
 	C.index = C.index + 1
-	return C.IPandPort + ":" + strconv.Itoa(C.index) + ":" + strconv.Itoa(C.index)
+	return C.IPandPort + ":" + strconv.Itoa(C.index)
 }
 
 func (C *Client) PeerExists(peer string) bool {
