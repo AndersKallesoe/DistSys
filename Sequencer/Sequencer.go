@@ -67,6 +67,7 @@ type GobConn struct {
 type Block struct {
 	BlockNumber int
 	IDList      []string
+	Signature   string
 }
 
 type Message struct {
@@ -284,31 +285,8 @@ func (C *Client) ConnectToPeers() {
 
 func (C *Client) HandleConnection(gc GobConn) {
 	blocknr := 0
-	fmt.Print("handling connection between: ")
-	fmt.Print(gc.conn.LocalAddr())
-	fmt.Print(" and ")
-	fmt.Println(gc.conn.RemoteAddr())
-
 	for {
 		dec := gc.dec
-		/*var receivedData string
-		if err := dec.Decode(&receivedData); err != nil {
-			// handle error
-		}
-		finalData := strings.Split(receivedData, " ")
-		msg := Message{}
-
-		if finalData[0] == "newblock" {
-			if err := dec.Decode(&msg); err != nil {
-				panic(err)
-			}
-		} else {
-			fmt.Print("finalData: ")
-			fmt.Println(finalData)
-			fmt.Print("receivedData: ")
-			fmt.Println(receivedData)
-			panic("error in decoding" + finalData[0])
-		}*/
 		msg := Message{}
 		if err := dec.Decode(&msg); err != nil {
 			panic(err)
@@ -329,7 +307,9 @@ func (C *Client) HandleConnection(gc GobConn) {
 			}
 		case "Broadcast Block":
 			block := msg.Block
-			if block.BlockNumber == blocknr {
+			d, n := SplitPublicKey(C.SPublicKey)
+			s := strings.Join(block.IDList, "")
+			if block.BlockNumber == blocknr && verify(s, block.Signature, d, n) {
 				C.PostBlock(block)
 				blocknr++
 				C.Broadcast(Message{Msgtype: "Broadcast Block", Transaction: SignedTransaction{}, Block: block})
@@ -347,9 +327,7 @@ func (C *Client) HandleConnection(gc GobConn) {
 func Test(C *Client, from Account, to Account) {
 	for i := 0; i < 1000; i++ {
 		time.Sleep(time.Millisecond)
-		C.lock.Lock()
 		C.makeTransaction(from, to, 1)
-		C.lock.Unlock()
 	}
 }
 
@@ -424,7 +402,10 @@ func (C *Client) CreateBlocks() {
 		}
 		C.pendingTransactions.Transactions = make(map[string]SignedTransaction)
 		C.pendingTransactions.lock.Unlock()
-		C.Broadcast(Message{Msgtype: "Broadcast Block", Transaction: SignedTransaction{}, Block: Block{blocknr, transactions}})
+		e, n := SplitPublicKey(C.SPrivateKey)
+		s := strings.Join(transactions, "")
+		Signature := sign(s, e, n)
+		C.Broadcast(Message{Msgtype: "Broadcast Block", Transaction: SignedTransaction{}, Block: Block{blocknr, transactions, Signature}})
 		C.PrintFromClient("Block made and broadcast!")
 	}
 }
