@@ -109,7 +109,7 @@ type Message struct {
 /*Main function*/
 
 func main() {
-	startingTime := time.Now()
+	startingTime := time.Now().Add(time.Second * 15)
 	KeyGen = MakeKeyGenerator()
 	i, _ := rand.Int(rand.Reader, big.NewInt(191919191916843213))
 	seed := Hash(i)
@@ -232,7 +232,11 @@ func (C *Client) ComputeDraw(seed *big.Int, slot int) *big.Int {
 	return stringToInt(draw)
 }
 
-func (C *Client) PlayLottery() {
+func (C *Client) Draw() bool {
+	return true
+}
+
+func (C *Client) PlayLottery(t time.Time) {
 	/*
 			at startingTime:
 			compute draw and broadcast
@@ -250,6 +254,15 @@ func (C *Client) PlayLottery() {
 				currentSlot++
 
 	*/
+	currentSlot := 0
+	for {
+		if time.Now().After(t.Add(time.Second * time.Duration(currentSlot))) {
+			if C.Draw() {
+
+			}
+			currentSlot++
+		}
+	}
 }
 
 func (C *Client) StartNetwork(GBlock Block) {
