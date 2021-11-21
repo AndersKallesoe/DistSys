@@ -107,6 +107,7 @@ type Message struct {
 	PublicKey   string
 	Block       Block
 	slot        int
+	Draw        *big.Int
 }
 
 /*Main function*/
@@ -330,7 +331,7 @@ func (C *Client) ParticipateInLottery(startTime time.Time) {
 			draw, won := C.PlayLottery(C.seed, currentSlot)
 			if won {
 				block := C.CreateBlock(C.LastBlock)
-				C.Broadcast(Message{Msgtype: "Broadcast Block", Transaction: SignedTransaction{}, Block: block})
+				C.Broadcast(Message{Msgtype: "Broadcast Block", Transaction: SignedTransaction{}, Block: block, PublicKey: C.PublicKey, slot: currentSlot, Draw: draw})
 			}
 			currentSlot++
 			time.Sleep(time.Millisecond * 900)
@@ -539,14 +540,6 @@ func (C *Client) CreateBlock(Predecessor string) Block {
 	C.LastBlock = HashBlock(block)
 	return block
 }
-
-/*type Block struct {
-	BlockNumber int
-	Seed        *big.Int
-	Ledger      map[string]int
-	IDList      []string
-	Signature   string
-}*/
 
 func (C *Client) PostBlock(block Block) {
 	//verify block
