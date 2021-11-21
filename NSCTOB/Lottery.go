@@ -294,11 +294,11 @@ func (C *Client) ComputeDraw(seed *big.Int, slot int) *big.Int {
 	return stringToInt(draw)
 }
 
-func (C *Client) ComputeVal(seed *big.Int, slot int, draw *big.Int) *big.Int {
+func (C *Client) ComputeVal(seed *big.Int, slot int, draw *big.Int, publicKey string) *big.Int {
 	C.ledger.lock.Lock()
 	defer C.ledger.lock.Unlock()
-	tickets := big.NewInt(int64(C.ledger.Accounts[C.PublicKey])) // change to C.ledger.Accounts[C.PublicKey]
-	stringToHash := "lottery" + intToString(seed) + strconv.Itoa(slot) + C.PublicKey + intToString(draw)
+	tickets := big.NewInt(int64(1000000)) // change to C.ledger.Accounts[C.PublicKey]
+	stringToHash := "lottery" + intToString(seed) + strconv.Itoa(slot) + publicKey + intToString(draw)
 	hash := Hash(stringToInt(stringToHash))
 	val := big.NewInt(0)
 	val.Mul(tickets, hash)
@@ -307,7 +307,7 @@ func (C *Client) ComputeVal(seed *big.Int, slot int, draw *big.Int) *big.Int {
 
 func (C *Client) PlayLottery(seed *big.Int, slot int) (*big.Int, bool) {
 	draw := C.ComputeDraw(seed, slot)
-	val := C.ComputeVal(seed, slot, draw)
+	val := C.ComputeVal(seed, slot, draw, C.PublicKey)
 	hardness := big.NewInt(2)
 	hardness.Exp(hardness, big.NewInt(256), nil)
 	hardness.Mul(hardness, big.NewInt(1000000))
@@ -337,6 +337,23 @@ func (C *Client) ParticipateInLottery(startTime time.Time) {
 			time.Sleep(time.Millisecond * 900)
 		}
 	}
+}
+
+func (C *Client) verifyDraw(seed *big.Int, slot int, draw *big.Int, publicKey string) bool {
+	signString := "lottery" + intToString(seed) + strconv.Itoa(slot)
+	e, n := SplitKey(publicKey)
+	return verify(signString, intToString(draw), e, n)
+}
+
+func (C *Client) verifyLotteryWinner(seed *big.Int, slot int, draw *big.Int, publicKey string) bool {
+	val := C.ComputeVal(seed, slot, draw, publicKey)
+	hardness := big.NewInt(2)
+	hardness.Exp(hardness, big.NewInt(256), nil)
+	hardness.Mul(hardness, big.NewInt(1000000))
+	hardness.Mul(hardness, big.NewInt(int64(Hardness)))
+	hardness.Div(hardness, big.NewInt(100))
+	won := val.Cmp(hardness) >= 0
+	return won
 }
 
 func (C *Client) StartNetwork(GBlock Block) {
@@ -503,14 +520,16 @@ func (C *Client) HandleConnection(gc GobConn) {
 				key := intToString(Hash(stringToInt(buildBlockString(block))))
 				C.blocks[key] = block
 				C.seed = block.Seed
-				/*start lottery thread*/
 			}
 		case "Broadcast Block": // potentielt noget bøvl ift hvornår blocks bliver broadcastet videre: (overvej block exists metode )
 			block := msg.Block
 			e, n := SplitKey(gc.PublicKey)
 			key := HashBlock(block)
 			C.blocks[key] = block
-			if block.BlockNumber == C.blocks[C.LastBlock].BlockNumber+1 && verifyblock(block, e, n) {
+			legalblock := block.BlockNumber == C.blocks[C.LastBlock].BlockNumber+1 && verifyblock(block, e, n) &&
+				C.verifyDraw(C.seed, msg.slot, msg.Draw, msg.PublicKey) &&
+				C.verifyLotteryWinner(C.seed, msg.slot, msg.Draw, msg.PublicKey)
+			if legalblock {
 				C.PostBlock(block)
 				C.Broadcast(Message{Msgtype: "Broadcast Block", Transaction: SignedTransaction{}, Block: block})
 				C.LastBlock = key
