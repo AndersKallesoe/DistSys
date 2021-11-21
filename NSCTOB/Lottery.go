@@ -50,6 +50,8 @@ type Client struct {
 	PrivateKey          string
 	lock                sync.Mutex
 	blocks              map[string]Block
+	seed                *big.Int
+	LastBlock           string
 }
 
 type Ledger struct {
@@ -58,7 +60,7 @@ type Ledger struct {
 }
 
 type PendingTransactions struct {
-	Transactions map[string]SignedTransaction
+	Transactions []SignedTransaction
 	lock         sync.Mutex
 }
 
@@ -89,6 +91,7 @@ type GobConn struct {
 }
 
 type Block struct {
+	Predecessor string
 	BlockNumber int
 	Seed        *big.Int
 	Ledger      map[string]int
@@ -101,15 +104,16 @@ type Message struct {
 	Transaction SignedTransaction
 	IPandPort   string
 	Peers       []string
-	AccountName string
 	PublicKey   string
 	Block       Block
+	slot        int
 }
 
 /*Main function*/
 
 func main() {
-	startingTime := time.Now().Add(time.Second * 15)
+	Hardness = 99
+
 	KeyGen = MakeKeyGenerator()
 	i, _ := rand.Int(rand.Reader, big.NewInt(191919191916843213))
 	seed := Hash(i)
@@ -161,7 +165,42 @@ func main() {
 	time.Sleep(time.Second)
 	go Client10.ConnectToNetwork(Client1.IPandPort)
 	time.Sleep(time.Second * 2)
+	startingTime := time.Now().Add(time.Second * 3)
+
+	go Client1.ParticipateInLottery(startingTime)
+	go Client2.ParticipateInLottery(startingTime)
+	go Client3.ParticipateInLottery(startingTime)
+	go Client4.ParticipateInLottery(startingTime)
+	go Client5.ParticipateInLottery(startingTime)
+	go Client6.ParticipateInLottery(startingTime)
+	go Client7.ParticipateInLottery(startingTime)
+	go Client8.ParticipateInLottery(startingTime)
+	go Client9.ParticipateInLottery(startingTime)
+	go Client10.ParticipateInLottery(startingTime)
+
 	fmt.Println(Client10.ledger.Accounts)
+}
+
+/*test */
+
+/* test that the lottery works as intended*/
+func testLottery() {
+	Hardness = 99
+	KeyGen = MakeKeyGenerator()
+	i, _ := rand.Int(rand.Reader, big.NewInt(191919191916843213))
+	seed := Hash(i)
+	Client1 := makeClient()
+	ledger := make(map[string]int)
+	ledger[Client1.PublicKey] = 1000000
+	Client1.ledger.Accounts = ledger
+	for i := 0; i < 1000; i++ {
+		draw, won := Client1.PlayLottery(seed, i)
+		if won {
+			fmt.Println("won", won, "draw:", draw)
+		}
+
+	}
+	Client1.PlayLottery(seed, 1)
 
 }
 
@@ -187,6 +226,22 @@ func MakeLedger() *Ledger {
 	return ledger
 }
 
+func (C *Client) MakeSignedTransaction(To string, Amount int) (bool, SignedTransaction) {
+	if Amount < 1 {
+		return false, SignedTransaction{}
+	}
+	C.ledger.lock.Lock()
+	defer C.ledger.lock.Unlock()
+	balance := C.ledger.Accounts[C.PublicKey]
+	if balance <= Amount {
+		return false, SignedTransaction{}
+	}
+	ID := C.getID()
+	d, n := SplitKey(C.PrivateKey)
+	Signature := sign(ID+C.PublicKey+To+strconv.Itoa(Amount), d, n)
+	return true, SignedTransaction{ID: ID, From: C.PublicKey, To: To, Amount: Amount, Signature: Signature}
+}
+
 func MakePostedTransactions() *PostedTransactions {
 	p := new(PostedTransactions)
 	p.Transactions = []string{}
@@ -195,8 +250,13 @@ func MakePostedTransactions() *PostedTransactions {
 
 func MakePendingTransactions() *PendingTransactions {
 	p := new(PendingTransactions)
-	p.Transactions = make(map[string]SignedTransaction)
+	p.Transactions = []SignedTransaction{}
 	return p
+}
+
+func (C *Client) getID() string {
+	C.index = C.index + 1
+	return C.IPandPort + ":" + strconv.Itoa(C.index)
 }
 
 func (conns *Conns) Set(key string, val net.Conn, pk string) {
@@ -207,11 +267,12 @@ func buildBlockString(B Block) string {
 	numberstring := strconv.Itoa(B.BlockNumber)
 	seedstring := intToString(B.Seed)
 	blockAsString := []string{numberstring, seedstring}
-	/*for k := range B.Ledger {
-		blockAsString = append(blockAsString, k)
-	}*/
 	blockAsString = append(blockAsString, B.IDList...)
 	return strings.Join(blockAsString, "")
+}
+
+func HashBlock(B Block) string {
+	return intToString(Hash(stringToInt(buildBlockString(B))))
 }
 
 func signBlock(B Block, d *big.Int, n *big.Int) string {
@@ -227,40 +288,52 @@ func verifyblock(B Block, e *big.Int, n *big.Int) bool {
 
 func (C *Client) ComputeDraw(seed *big.Int, slot int) *big.Int {
 	signString := "lottery" + intToString(seed) + strconv.Itoa(slot)
-	d, n := SplitKey(C.PublicKey)
+	d, n := SplitKey(C.PrivateKey)
 	draw := sign(signString, d, n)
 	return stringToInt(draw)
 }
 
-func (C *Client) Draw() bool {
-	return true
+func (C *Client) ComputeVal(seed *big.Int, slot int, draw *big.Int) *big.Int {
+	C.ledger.lock.Lock()
+	defer C.ledger.lock.Unlock()
+	tickets := big.NewInt(int64(C.ledger.Accounts[C.PublicKey])) // change to C.ledger.Accounts[C.PublicKey]
+	stringToHash := "lottery" + intToString(seed) + strconv.Itoa(slot) + C.PublicKey + intToString(draw)
+	hash := Hash(stringToInt(stringToHash))
+	val := big.NewInt(0)
+	val.Mul(tickets, hash)
+	return val
 }
 
-func (C *Client) PlayLottery(t time.Time) {
+func (C *Client) PlayLottery(seed *big.Int, slot int) (*big.Int, bool) {
+	draw := C.ComputeDraw(seed, slot)
+	val := C.ComputeVal(seed, slot, draw)
+	hardness := big.NewInt(2)
+	hardness.Exp(hardness, big.NewInt(256), nil)
+	hardness.Mul(hardness, big.NewInt(1000000))
+	hardness.Mul(hardness, big.NewInt(int64(Hardness)))
+	hardness.Div(hardness, big.NewInt(100))
+	won := val.Cmp(hardness) >= 0
+	return draw, won
+}
+
+func (C *Client) ParticipateInLottery(startTime time.Time) {
 	/*
-			at startingTime:
-			compute draw and broadcast
-		at startingTime + 1*slotLength:
-			compute draw and broadcast
-		at startingTime + 2*slotLength:
-			compute draw and broadcast
-
-
-		currentSlot := 0
-		while True:
-			if time.now() == startingTime + currentSlot*slotLength:
-				computeDraw
-				add transactions and broadcast signed block if won lottery
-				currentSlot++
-
+		new block every 10 seconds: 100 draws for all clients 1 must win
+		set hardness such that there is a 1 % chance to win for a draw
+		max hashsize 2^256
+		max draw (initial situation): 1000000 * max hashsize
+		hardness = 0,99 * max draw
 	*/
 	currentSlot := 0
 	for {
-		if time.Now().After(t.Add(time.Second * time.Duration(currentSlot))) {
-			if C.Draw() {
-
+		if time.Now().After(startTime.Add(time.Second * time.Duration(currentSlot))) {
+			draw, won := C.PlayLottery(C.seed, currentSlot)
+			if won {
+				block := C.CreateBlock(C.LastBlock)
+				C.Broadcast(Message{Msgtype: "Broadcast Block", Transaction: SignedTransaction{}, Block: block})
 			}
 			currentSlot++
+			time.Sleep(time.Millisecond * 900)
 		}
 	}
 }
@@ -270,7 +343,10 @@ func (C *Client) StartNetwork(GBlock Block) {
 	ln := C.StartListen()
 	C.PrintFromClient("Starting new network")
 	C.peers = append(C.peers, C.IPandPort)
-
+	C.ledger.Accounts = GBlock.Ledger
+	key := intToString(Hash(stringToInt(buildBlockString(GBlock))))
+	C.blocks[key] = GBlock
+	C.seed = GBlock.Seed
 	go C.Listen(ln)
 	time.Sleep(time.Second * 11)
 	C.PrintFromClient("i sent the genesis block")
@@ -393,7 +469,6 @@ func (C *Client) Listen(ln net.Listener) {
 }
 
 func (C *Client) HandleConnection(gc GobConn) {
-	blocknr := 0
 	for {
 		dec := gc.dec
 		msg := Message{}
@@ -409,9 +484,10 @@ func (C *Client) HandleConnection(gc GobConn) {
 			}
 		case "Broadcast Transaction":
 			transaction := msg.Transaction
-			if !C.TransactionExists(transaction.ID) {
+			exists, _ := C.TransactionExists(transaction.ID)
+			if !exists {
 				C.pendingTransactions.lock.Lock()
-				C.pendingTransactions.Transactions[transaction.ID] = transaction
+				C.pendingTransactions.Transactions = append(C.pendingTransactions.Transactions, transaction)
 				C.pendingTransactions.lock.Unlock()
 				C.Broadcast(Message{Msgtype: "Broadcast Transaction", Transaction: transaction, Block: Block{}})
 			}
@@ -425,19 +501,18 @@ func (C *Client) HandleConnection(gc GobConn) {
 				C.ledger.Accounts = block.Ledger
 				key := intToString(Hash(stringToInt(buildBlockString(block))))
 				C.blocks[key] = block
+				C.seed = block.Seed
 				/*start lottery thread*/
 			}
-		case "Broadcast Block":
+		case "Broadcast Block": // potentielt noget bøvl ift hvornår blocks bliver broadcastet videre: (overvej block exists metode )
 			block := msg.Block
 			e, n := SplitKey(gc.PublicKey)
-			if block.BlockNumber == blocknr && verifyblock(block, e, n) {
+			key := HashBlock(block)
+			C.blocks[key] = block
+			if block.BlockNumber == C.blocks[C.LastBlock].BlockNumber+1 && verifyblock(block, e, n) {
 				C.PostBlock(block)
-				key := intToString(Hash(stringToInt(buildBlockString(block))))
-				C.blocks[key] = block
-				blocknr++
 				C.Broadcast(Message{Msgtype: "Broadcast Block", Transaction: SignedTransaction{}, Block: block})
-			} else if block.BlockNumber > blocknr {
-				panic("A block was recieved out of order")
+				C.LastBlock = key
 			}
 		default:
 			C.PrintFromClient("No match case found for: " + msg.Msgtype)
@@ -446,18 +521,43 @@ func (C *Client) HandleConnection(gc GobConn) {
 	}
 }
 
+func (C *Client) CreateBlock(Predecessor string) Block {
+	/*blocknr := -1*/
+	transactions := []string{}
+	C.pendingTransactions.lock.Lock()
+	for t := range C.pendingTransactions.Transactions {
+		st := C.pendingTransactions.Transactions[t]
+		C.PostTransaction(st)
+		transactions = append(transactions, st.ID)
+	}
+	C.pendingTransactions.Transactions = []SignedTransaction{}
+	C.pendingTransactions.lock.Unlock()
+
+	block := Block{Predecessor: Predecessor, BlockNumber: 1, IDList: transactions}
+	e, n := SplitKey(C.PrivateKey)
+	block.Signature = signBlock(block, e, n)
+	C.LastBlock = HashBlock(block)
+	return block
+}
+
+/*type Block struct {
+	BlockNumber int
+	Seed        *big.Int
+	Ledger      map[string]int
+	IDList      []string
+	Signature   string
+}*/
+
 func (C *Client) PostBlock(block Block) {
 	//verify block
 	for b := range block.IDList {
 		id := block.IDList[b]
-		for !C.TransactionExists(id) {
+		exists, transaction := C.TransactionExists(id)
+		for !exists {
 			time.Sleep(time.Microsecond)
+			exists, transaction = C.TransactionExists(id)
 		}
-		C.pendingTransactions.lock.Lock()
-		transaction := C.pendingTransactions.Transactions[id]
-		C.pendingTransactions.lock.Unlock()
 		C.PostTransaction(transaction)
-
 	}
 	C.PrintFromClient("Block posted")
 }
@@ -499,12 +599,12 @@ func getIP() string {
 	return IP
 }
 
-func (C *Client) TransactionExists(transaction string) bool {
+func (C *Client) TransactionExists(transaction string) (bool, SignedTransaction) {
 	C.postedTransactions.lock.Lock()
 	defer C.postedTransactions.lock.Unlock()
 	for p := range C.postedTransactions.Transactions {
 		if C.postedTransactions.Transactions[p] == transaction {
-			return true
+			return true, SignedTransaction{}
 		}
 	}
 
@@ -512,10 +612,10 @@ func (C *Client) TransactionExists(transaction string) bool {
 	defer C.pendingTransactions.lock.Unlock()
 	for p := range C.pendingTransactions.Transactions {
 		if C.pendingTransactions.Transactions[p].ID == transaction {
-			return true
+			return true, C.pendingTransactions.Transactions[p]
 		}
 	}
-	return false
+	return false, SignedTransaction{}
 }
 
 func (C *Client) PeerExists(peer string) bool {
