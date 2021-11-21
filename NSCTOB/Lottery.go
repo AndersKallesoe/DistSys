@@ -8,11 +8,6 @@ implementere rollbacks
 dybdemetode (rekursiv )
 generel testing
 
-"13. When a transaction is made, the receiver gets 1 AU less than what was sent.
-This is a transaction fee.
-14. When a new block is made, then the account of the block creator gets 10 AU
-plus one AU for each transaction in the block."
-
 1. How can the TA run your code.
 2. How did you test your code. Remember to test also against some of the peers
 being malicious.
@@ -210,6 +205,13 @@ func testLottery() {
 	}
 	Client1.PlayLottery(seed, 1)
 
+}
+
+func (C *Client) createTransactions(publicKey string) {
+	for i := 0; true; i++ {
+		_, t := C.MakeSignedTransaction(publicKey, i)
+		C.Broadcast(Message{Msgtype: "Broadcast Transaction", Transaction: t, Block: Block{}})
+	}
 }
 
 /*make methods*/
@@ -514,7 +516,7 @@ func (C *Client) HandleConnection(gc GobConn) {
 				C.pendingTransactions.lock.Lock()
 				C.pendingTransactions.Transactions = append(C.pendingTransactions.Transactions, transaction)
 				C.pendingTransactions.lock.Unlock()
-				C.Broadcast(Message{Msgtype: "Broadcast Transaction", Transaction: transaction, Block: Block{}})
+				C.Broadcast(msg)
 			}
 
 		case "Genesis Block": // broadcaster ikke men burde nok gøre det.
@@ -540,6 +542,8 @@ func (C *Client) HandleConnection(gc GobConn) {
 				C.PostBlock(block)
 				C.Broadcast(Message{Msgtype: "Broadcast Block", Transaction: SignedTransaction{}, Block: block})
 				C.LastBlock = key
+				C.ledger.lock.Lock()
+				C.ledger.Accounts[msg.PublicKey] += len(msg.Block.IDList) + 10
 			}
 		default:
 			C.PrintFromClient("No match case found for: " + msg.Msgtype)
@@ -558,8 +562,8 @@ func (C *Client) CreateBlock(Predecessor string) Block {
 		transactions = append(transactions, st.ID)
 	}
 	C.pendingTransactions.Transactions = []SignedTransaction{}
+	C.ledger.Accounts[C.PublicKey] += len(transactions) + 10
 	C.pendingTransactions.lock.Unlock()
-
 	block := Block{Predecessor: Predecessor, BlockNumber: 1, IDList: transactions}
 	e, n := SplitKey(C.PrivateKey)
 	block.Signature = signBlock(block, e, n)
@@ -578,6 +582,7 @@ func (C *Client) PostBlock(block Block) {
 		}
 		C.PostTransaction(transaction)
 	}
+
 	C.PrintFromClient("Block posted")
 }
 
@@ -595,7 +600,7 @@ func (C *Client) PostTransaction(t SignedTransaction) {
 		return
 	}
 	C.ledger.Accounts[t.From] -= t.Amount
-	C.ledger.Accounts[t.To] += t.Amount
+	C.ledger.Accounts[t.To] += t.Amount - 1
 }
 
 func (C *Client) Broadcast(m Message) {
