@@ -1,5 +1,31 @@
 package main
 
+/*
+test blocks
+transaction threads
+test system
+implementere rollbacks
+dybdemetode (rekursiv )
+generel testing
+
+"13. When a transaction is made, the receiver gets 1 AU less than what was sent.
+This is a transaction fee.
+14. When a new block is made, then the account of the block creator gets 10 AU
+plus one AU for each transaction in the block."
+
+1. How can the TA run your code.
+2. How did you test your code. Remember to test also against some of the peers
+being malicious.
+3. How did you test that agreement was achieved.
+4. During test, try to set your block time so low that you provoke rollbacks to
+make sure your system can tolerate this. If you simulate your network, you
+might have to insert a simulated network delay to see this.
+5. When the system is not under attack, how many transactions per second can
+the system handle. (A transaction is not counted as done until it has been
+ordered and the balance of the accounts have been updated with that transac-
+tion.)
+
+*/
 import (
 	"crypto/rand"
 	"encoding/gob"
@@ -13,30 +39,11 @@ import (
 	"time"
 )
 
-/*
-1. genesis block
-	seed
-	Initial ledger
-	pk's
-
-proof of stake protocol:
-each second(slot)
-1. compute draw = sig_vk_i ("Lottery", Seed ,Slot )
-2. compute val = stake * H("Lottery", Seed, vk_i, Draw)
-3. if val>= hardness
-	broadcast block
-
-*/
 var SlotLength int
 var Hardness int
 var KeyGen KeyGenerator
 
-func getVal(slot int, draw int) int {
-	return 0
-}
-
 /*Structs*/
-
 type Client struct {
 	ledger              *Ledger
 	peers               []string
@@ -510,7 +517,7 @@ func (C *Client) HandleConnection(gc GobConn) {
 				C.Broadcast(Message{Msgtype: "Broadcast Transaction", Transaction: transaction, Block: Block{}})
 			}
 
-		case "Genesis Block":
+		case "Genesis Block": // broadcaster ikke men burde nok gøre det.
 			C.PrintFromClient("i recieved the genesis block")
 			block := msg.Block
 			e, n := SplitKey(gc.PublicKey)
