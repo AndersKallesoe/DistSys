@@ -47,8 +47,7 @@ func KeyToString(v *big.Int, m *big.Int) string {
 func SplitKey(pk string) (*big.Int, *big.Int) {
 	s := strings.Split(pk, ":")
 	if len(s) != 2 {
-		fmt.Print("Key: ")
-		fmt.Println(pk)
+		fmt.Println("Key: ", pk)
 		panic("Error: there was an error in splitting a public key")
 	}
 	return stringToInt(s[0]), stringToInt(s[1])
@@ -118,6 +117,13 @@ func Decrypt(c *big.Int, d *big.Int, n *big.Int) *big.Int {
 
 func Hash(m *big.Int) *big.Int {
 	s := sha256.Sum256(m.Bytes())
+	r := big.NewInt(0)
+	r.SetBytes(s[:])
+	return r
+}
+
+func HashString(m string) *big.Int {
+	s := sha256.Sum256([]byte(m))
 	r := big.NewInt(0)
 	r.SetBytes(s[:])
 	return r

@@ -2,10 +2,8 @@ package main
 
 /*
 test blocks
-transaction threads
 test system
 implementere rollbacks
-dybdemetode (rekursiv )
 generel testing
 
 1. How can the TA run your code.
@@ -50,7 +48,6 @@ type Client struct {
 	LocalAccounts       map[string]Account
 	PublicKey           string
 	PrivateKey          string
-	lock                sync.Mutex
 	blocks              map[string]Block
 	seed                *big.Int
 	LastBlock           string
@@ -108,14 +105,15 @@ type Message struct {
 	Peers       []string
 	PublicKey   string
 	Block       Block
-	slot        int
+	Slot        int
 	Draw        *big.Int
+	BlockSender string
 }
 
 /*Main function*/
 
 func main() {
-	Hardness = 99
+	Hardness = 97
 
 	KeyGen = MakeKeyGenerator()
 	i, _ := rand.Int(rand.Reader, big.NewInt(191919191916843213))
@@ -147,28 +145,28 @@ func main() {
 	GBlock := Block{BlockNumber: 1, Seed: seed, Ledger: ledger, Signature: ""}
 	d, n := SplitKey(Client1.PrivateKey)
 	GBlock.Signature = signBlock(GBlock, d, n)
-
+	halt := time.Millisecond * 500
 	go Client1.StartNetwork(GBlock)
-	time.Sleep(time.Second)
+	time.Sleep(halt)
 	go Client2.ConnectToNetwork(Client1.IPandPort)
-	time.Sleep(time.Second)
+	time.Sleep(halt)
 	go Client3.ConnectToNetwork(Client1.IPandPort)
-	time.Sleep(time.Second)
+	time.Sleep(halt)
 	go Client4.ConnectToNetwork(Client1.IPandPort)
-	time.Sleep(time.Second)
+	time.Sleep(halt)
 	go Client5.ConnectToNetwork(Client1.IPandPort)
-	time.Sleep(time.Second)
+	time.Sleep(halt)
 	go Client6.ConnectToNetwork(Client1.IPandPort)
-	time.Sleep(time.Second)
+	time.Sleep(halt)
 	go Client7.ConnectToNetwork(Client1.IPandPort)
-	time.Sleep(time.Second)
+	time.Sleep(halt)
 	go Client8.ConnectToNetwork(Client1.IPandPort)
-	time.Sleep(time.Second)
+	time.Sleep(halt)
 	go Client9.ConnectToNetwork(Client1.IPandPort)
-	time.Sleep(time.Second)
+	time.Sleep(halt)
 	go Client10.ConnectToNetwork(Client1.IPandPort)
-	time.Sleep(time.Second * 2)
-	startingTime := time.Now().Add(time.Second * 3)
+	time.Sleep(time.Second)
+	startingTime := time.Now().Add(time.Second)
 
 	go Client1.ParticipateInLottery(startingTime)
 	go Client2.ParticipateInLottery(startingTime)
@@ -180,8 +178,14 @@ func main() {
 	go Client8.ParticipateInLottery(startingTime)
 	go Client9.ParticipateInLottery(startingTime)
 	go Client10.ParticipateInLottery(startingTime)
-
-	fmt.Println(Client10.ledger.Accounts)
+	time.Sleep(time.Minute)
+	fmt.Println(Client10.blocks)
+	hardness := big.NewInt(2)
+	hardness.Exp(hardness, big.NewInt(256), nil)
+	hardness.Mul(hardness, big.NewInt(1000000))
+	hardness.Mul(hardness, big.NewInt(int64(Hardness)))
+	hardness.Div(hardness, big.NewInt(100))
+	fmt.Println(hardness)
 }
 
 /*test */
@@ -212,6 +216,14 @@ func (C *Client) createTransactions(publicKey string) {
 		_, t := C.MakeSignedTransaction(publicKey, i)
 		C.Broadcast(Message{Msgtype: "Broadcast Transaction", Transaction: t, Block: Block{}})
 	}
+}
+
+func (C *Client) ChainDepth(key string) int {
+	if key != "" {
+		parenthash := C.blocks[key].Predecessor
+		return 1 + C.ChainDepth(parenthash)
+	}
+	return 0
 }
 
 /*make methods*/
@@ -269,10 +281,11 @@ func (C *Client) getID() string {
 	return C.IPandPort + ":" + strconv.Itoa(C.index)
 }
 
-func (conns *Conns) Set(key string, val net.Conn, pk string) {
-	conns.m[key] = GobConn{val, gob.NewEncoder(val), gob.NewDecoder(val), pk}
+func (conns *Conns) Set(IpandPort string, conn net.Conn, enc *gob.Encoder, dec *gob.Decoder, pk string) {
+	conns.mutex.Lock()
+	conns.m[IpandPort] = GobConn{conn, enc, dec, pk}
+	conns.mutex.Unlock()
 }
-
 func buildBlockString(B Block) string {
 	numberstring := strconv.Itoa(B.BlockNumber)
 	seedstring := intToString(B.Seed)
@@ -308,7 +321,8 @@ func (C *Client) ComputeVal(seed *big.Int, slot int, draw *big.Int, publicKey st
 	defer C.ledger.lock.Unlock()
 	tickets := big.NewInt(int64(1000000)) // change to C.ledger.Accounts[C.PublicKey]
 	stringToHash := "lottery" + intToString(seed) + strconv.Itoa(slot) + publicKey + intToString(draw)
-	hash := Hash(stringToInt(stringToHash))
+	hash := HashString(stringToHash)
+	//fmt.Println(hash, "----->", C.PublicKey)
 	val := big.NewInt(0)
 	val.Mul(tickets, hash)
 	return val
@@ -336,15 +350,18 @@ func (C *Client) ParticipateInLottery(startTime time.Time) {
 	*/
 	currentSlot := 0
 	for {
+		//fmt.Println(C.PublicKey, "-----> Now checking if I've reached the next slot!")
 		if time.Now().After(startTime.Add(time.Second * time.Duration(currentSlot))) {
 			draw, won := C.PlayLottery(C.seed, currentSlot)
 			if won {
+				fmt.Println(C.ComputeVal(C.seed, currentSlot, draw, C.PublicKey), C.PublicKey, C.IPandPort)
 				block := C.CreateBlock(C.LastBlock)
-				C.Broadcast(Message{Msgtype: "Broadcast Block", Transaction: SignedTransaction{}, Block: block, PublicKey: C.PublicKey, slot: currentSlot, Draw: draw})
+				C.Broadcast(Message{Msgtype: "Broadcast Block", Transaction: SignedTransaction{}, Block: block, PublicKey: C.PublicKey, Slot: currentSlot, Draw: draw, BlockSender: C.IPandPort})
 			}
 			currentSlot++
-			time.Sleep(time.Millisecond * 900)
+
 		}
+		time.Sleep(time.Millisecond * 900)
 	}
 }
 
@@ -366,18 +383,19 @@ func (C *Client) verifyLotteryWinner(seed *big.Int, slot int, draw *big.Int, pub
 }
 
 func (C *Client) StartNetwork(GBlock Block) {
-
 	ln := C.StartListen()
 	C.PrintFromClient("Starting new network")
 	C.peers = append(C.peers, C.IPandPort)
 	C.ledger.Accounts = GBlock.Ledger
-	key := intToString(Hash(stringToInt(buildBlockString(GBlock))))
+	key := HashBlock(GBlock)
 	C.blocks[key] = GBlock
 	C.seed = GBlock.Seed
+	fmt.Println("i am client 1 this is my ipandport:", C.IPandPort)
 	go C.Listen(ln)
-	time.Sleep(time.Second * 11)
+	time.Sleep(time.Second * 6)
 	C.PrintFromClient("i sent the genesis block")
-	C.Broadcast(Message{Msgtype: "Genesis Block", Transaction: SignedTransaction{}, Block: GBlock})
+	mess := Message{Msgtype: "Genesis Block", Transaction: SignedTransaction{}, Block: GBlock, BlockSender: C.IPandPort}
+	C.Broadcast(mess)
 	for {
 	}
 }
@@ -404,12 +422,13 @@ func (C *Client) ConnectToNetwork(IPAndPort string) {
 		ln := C.StartListen()
 		C.peers = append(C.peers, msg.Peers...)
 		C.peers = append(C.peers, C.IPandPort)
-		C.PublicKey = msg.PublicKey
 		conn.Close()
 		C.ConnectToPeers()
+		C.conns.mutex.Lock()
 		for _, conn := range C.conns.m {
 			go C.HandleConnection(conn)
 		}
+		C.conns.mutex.Unlock()
 		C.Listen(ln)
 	}
 
@@ -426,11 +445,13 @@ func (C *Client) ConnectToPeers() {
 	for p := range peers {
 		conn, err := net.Dial("tcp", peers[p])
 		if conn == nil {
+			panic(err)
 		} else if err != nil {
-			return
+			panic(err)
 		} else {
 			enc := gob.NewEncoder(conn)
-			request := Message{Msgtype: "Connection", Transaction: SignedTransaction{}, Block: Block{}}
+			request := Message{Msgtype: "Connection", IPandPort: C.IPandPort, Transaction: SignedTransaction{}, Block: Block{}, PublicKey: C.PublicKey, Draw: nil}
+
 			err := enc.Encode(request)
 			if err != nil {
 				panic(err)
@@ -441,12 +462,11 @@ func (C *Client) ConnectToPeers() {
 			if err != nil {
 				panic(err)
 			}
-			C.conns.mutex.Lock()
-			C.conns.Set(conn.RemoteAddr().String(), conn, msg.PublicKey)
-			C.conns.mutex.Unlock()
+			C.conns.Set(msg.IPandPort, conn, enc, dec, msg.PublicKey)
 		}
 	}
-	C.Broadcast(Message{Msgtype: "Broadcast Presence", IPandPort: C.IPandPort, Transaction: SignedTransaction{}, Block: Block{}})
+
+	C.Broadcast(Message{Msgtype: "Broadcast Presence", IPandPort: C.IPandPort, Peers: []string{}, Block: Block{}})
 }
 
 func (C *Client) StartListen() net.Listener {
@@ -460,34 +480,32 @@ func (C *Client) StartListen() net.Listener {
 
 func (C *Client) Listen(ln net.Listener) {
 	defer ln.Close()
-	//fmt.Println("i listen")
 	for {
 		conn, _ := ln.Accept()
 		msg := Message{}
 		dec := gob.NewDecoder(conn)
 		err := dec.Decode(&msg)
+		enc := gob.NewEncoder(conn)
 		if err != nil {
 			panic(err)
 		}
 		switch msg.Msgtype {
 		case "Requesting Peers":
 			peers := Message{Peers: C.peers, Transaction: SignedTransaction{}, Block: Block{}}
-			enc := gob.NewEncoder(conn)
+
 			err = enc.Encode(&peers)
 			if err != nil {
 				panic(err)
 			}
 		case "Connection":
-			C.conns.mutex.Lock()
-			C.conns.Set(conn.RemoteAddr().String(), conn, msg.PublicKey)
-			C.conns.mutex.Unlock()
-			pk := Message{PublicKey: C.PublicKey}
-			enc := gob.NewEncoder(conn)
+			C.conns.Set(msg.IPandPort, conn, enc, dec, msg.PublicKey)
+			pk := Message{IPandPort: C.IPandPort, PublicKey: C.PublicKey}
+
 			err = enc.Encode(&pk)
 			if err != nil {
 				panic(err)
 			}
-			go C.HandleConnection(C.conns.m[conn.RemoteAddr().String()])
+			go C.HandleConnection(C.conns.m[msg.IPandPort])
 		default:
 			fmt.Println("No match case found for: " + msg.Msgtype)
 		}
@@ -500,13 +518,14 @@ func (C *Client) HandleConnection(gc GobConn) {
 		dec := gc.dec
 		msg := Message{}
 		if err := dec.Decode(&msg); err != nil {
-			fmt.Println(C.IPandPort)
+			fmt.Println("Error at", C.IPandPort)
 			panic(err)
 		}
 		switch msg.Msgtype {
 		case "Broadcast Presence":
 			if !C.PeerExists(msg.IPandPort) {
 				C.peers = append(C.peers, msg.IPandPort)
+
 				C.Broadcast(msg)
 			}
 		case "Broadcast Transaction":
@@ -520,30 +539,39 @@ func (C *Client) HandleConnection(gc GobConn) {
 			}
 
 		case "Genesis Block": // broadcaster ikke men burde nok gøre det.
-			C.PrintFromClient("i recieved the genesis block")
 			block := msg.Block
-			e, n := SplitKey(gc.PublicKey)
+			pk := C.conns.m[msg.BlockSender].PublicKey
+			e, n := SplitKey(pk)
 			blockverified := verifyblock(block, e, n)
 			if blockverified {
 				C.ledger.Accounts = block.Ledger
 				key := intToString(Hash(stringToInt(buildBlockString(block))))
 				C.blocks[key] = block
 				C.seed = block.Seed
+			} else {
+				panic("unable to verify genesis block")
 			}
 		case "Broadcast Block": // potentielt noget bøvl ift hvornår blocks bliver broadcastet videre: (overvej block exists metode )
 			block := msg.Block
-			e, n := SplitKey(gc.PublicKey)
+			pk := C.conns.m[msg.BlockSender].PublicKey
+			if pk == "" {
+				panic("looking for public key not recieved")
+			}
+			e, n := SplitKey(pk)
 			key := HashBlock(block)
 			C.blocks[key] = block
 			legalblock := block.BlockNumber == C.blocks[C.LastBlock].BlockNumber+1 && verifyblock(block, e, n) &&
-				C.verifyDraw(C.seed, msg.slot, msg.Draw, msg.PublicKey) &&
-				C.verifyLotteryWinner(C.seed, msg.slot, msg.Draw, msg.PublicKey)
+				C.verifyDraw(C.seed, msg.Slot, msg.Draw, msg.PublicKey) &&
+				C.verifyLotteryWinner(C.seed, msg.Slot, msg.Draw, msg.PublicKey)
 			if legalblock {
 				C.PostBlock(block)
-				C.Broadcast(Message{Msgtype: "Broadcast Block", Transaction: SignedTransaction{}, Block: block})
+				//C.Broadcast(msg)
 				C.LastBlock = key
 				C.ledger.lock.Lock()
 				C.ledger.Accounts[msg.PublicKey] += len(msg.Block.IDList) + 10
+				C.ledger.lock.Unlock()
+			} else {
+
 			}
 		default:
 			C.PrintFromClient("No match case found for: " + msg.Msgtype)
@@ -564,7 +592,8 @@ func (C *Client) CreateBlock(Predecessor string) Block {
 	C.pendingTransactions.Transactions = []SignedTransaction{}
 	C.ledger.Accounts[C.PublicKey] += len(transactions) + 10
 	C.pendingTransactions.lock.Unlock()
-	block := Block{Predecessor: Predecessor, BlockNumber: 1, IDList: transactions}
+
+	block := Block{Predecessor: Predecessor, BlockNumber: C.blocks[C.LastBlock].BlockNumber + 1, IDList: transactions}
 	e, n := SplitKey(C.PrivateKey)
 	block.Signature = signBlock(block, e, n)
 	C.LastBlock = HashBlock(block)
@@ -582,8 +611,6 @@ func (C *Client) PostBlock(block Block) {
 		}
 		C.PostTransaction(transaction)
 	}
-
-	C.PrintFromClient("Block posted")
 }
 
 func (C *Client) PostTransaction(t SignedTransaction) {
@@ -596,7 +623,6 @@ func (C *Client) PostTransaction(t SignedTransaction) {
 		return
 	}
 	if !(C.ledger.Accounts[t.From]-t.Amount >= 0) {
-		//C.PrintFromClient("amount to large on transaction: " + t.ID) too many prints
 		return
 	}
 	C.ledger.Accounts[t.From] -= t.Amount
@@ -604,6 +630,8 @@ func (C *Client) PostTransaction(t SignedTransaction) {
 }
 
 func (C *Client) Broadcast(m Message) {
+	C.conns.mutex.Lock()
+	defer C.conns.mutex.Unlock()
 	for k := range C.conns.m {
 		if err := C.conns.m[k].enc.Encode(&m); err != nil {
 			panic(err)
