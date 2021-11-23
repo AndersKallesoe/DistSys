@@ -206,6 +206,9 @@ func testNSCTOB(hardness int) {
 	fmt.Println(Client2.ChainDepth(Client2.LastBlock))
 	fmt.Println(Client3.ChainDepth(Client3.LastBlock))
 	fmt.Println(Client4.ChainDepth(Client4.LastBlock))
+	Client1.printBlockChain()
+	Client2.printBlockChain()
+	fmt.Println(ValidateBlockChain(Client1, Client2))
 }
 
 func createClients() []*Client {
@@ -566,6 +569,7 @@ func (C *Client) StartNetwork(GBlock Block) {
 	C.peers = append(C.peers, C.IPandPort)
 	C.ledger.Accounts = GBlock.Ledger
 	C.blocks["Genesis"] = GBlock
+	C.LastBlock = "Genesis"
 	C.seed = GBlock.Seed
 	C.Listen(ln)
 }
@@ -590,6 +594,7 @@ func (C *Client) ConnectToNetwork(IPAndPort string) {
 			panic(err)
 		}
 		C.blocks["Genesis"] = msg.Block
+		C.LastBlock = "Genesis"
 		C.ledger.Accounts = msg.Block.Ledger
 		C.seed = msg.Block.Seed
 		ln := C.StartListen()
@@ -797,11 +802,38 @@ func (C *Client) createTransactions(publicKey string) {
 }
 
 //Takes an array of Clients checks that all of their blockchains are the same*/
-func ValidateBlockChain([]Client) bool {
-	return true
+func ValidateBlockChain(C1 *Client, C2 *Client) bool {
+	return C1.buildBlockChainString(C1.LastBlock) == C2.buildBlockChainString(C2.LastBlock)
 }
 
 //Prints the blockchain of a Client
 func (C *Client) printBlockChain() {
-
+	fmt.Println(C.buildBlockChainString(C.LastBlock))
 }
+
+func (C *Client) buildBlockChainString(pointer string) string {
+	if pointer != "Genesis" {
+		predecessor := C.buildBlockChainString(C.blocks[pointer].Predecessor)
+		return predecessor + "-->" + pointer
+	}
+	return "Genesis"
+}
+
+/*
+//Prints the blockchain of a Client
+func (C *Client) printBlockChain(blockptr string) {
+	if blockptr != "" {
+		fmt.Println(blockptr)
+		C.printBlockChain(C.blocks[blockptr].Predecessor)
+	}
+	return
+}
+
+func (C *Client) buildBlockChainString(pointer string) string {
+	if pointer != "Genesis" {
+		predecessor := C.buildBlockChainString(C.blocks[pointer].Predecessor)
+		return predecessor + "-->" + pointer
+	}
+	return "Genesis"
+}
+*/
