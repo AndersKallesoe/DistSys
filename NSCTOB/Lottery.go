@@ -109,9 +109,9 @@ type Message struct {
 	BlockSender string
 }
 
-// primary test method
+// primary test method -- currently does not work.. something to do with putting clients in an array ???
 func testNSCTOB(hardness int) {
-	Hardness = hardness
+	/*Hardness = hardness
 	i, _ := rand.Int(rand.Reader, big.NewInt(191919191916843213))
 	seed := Hash(i)
 	clients := createClients()
@@ -121,45 +121,23 @@ func testNSCTOB(hardness int) {
 	d, n := SplitKey(clients[0].PrivateKey)
 	GBlock.Signature = signBlock(GBlock, d, n)
 	go clients[0].StartNetwork(GBlock)
-	time.Sleep(time.Millisecond * 250)
+	time.Sleep(time.Millisecond * 1000)
 	ip := clients[0].IPandPort
 	for key := range clients[0:] {
-		time.Sleep(time.Millisecond * 250)
+
 		go clients[key].ConnectToNetwork(ip)
+		time.Sleep(time.Second * 2)
 	}
 
 	startingTime := time.Now().Add(time.Second * 2)
 	for key := range clients {
+
 		go clients[key].ParticipateInLottery(startingTime)
 	}
 	time.Sleep(time.Minute)
 	for key := range clients {
 		fmt.Println(clients[key].ChainDepth(clients[key].LastBlock))
-	}
-}
-
-func createClients() []*Client {
-	clients := []*Client{}
-	for i := 1; i < 10; i++ {
-		clients = append(clients, makeClient())
-	}
-	return clients
-}
-
-func createLedger(clients []*Client) map[string]int {
-	ledger := make(map[string]int)
-	for key := range clients {
-		ledger[clients[key].PublicKey] = 1000000
-	}
-	return ledger
-}
-
-/*Main function*/
-
-func main() {
-
-	KeyGen = MakeKeyGenerator()
-	//testNSCTOB(99)
+	}*/
 	Hardness = 99
 	i, _ := rand.Int(rand.Reader, big.NewInt(191919191916843213))
 	seed := Hash(i)
@@ -228,6 +206,98 @@ func main() {
 	fmt.Println(Client2.ChainDepth(Client2.LastBlock))
 	fmt.Println(Client3.ChainDepth(Client3.LastBlock))
 	fmt.Println(Client4.ChainDepth(Client4.LastBlock))
+}
+
+func createClients() []*Client {
+	clients := []*Client{}
+	for i := 1; i < 5; i++ {
+		clients = append(clients, makeClient())
+	}
+	return clients
+}
+
+func createLedger(clients []*Client) map[string]int {
+	ledger := make(map[string]int)
+	for key := range clients {
+		ledger[clients[key].PublicKey] = 1000000
+	}
+	return ledger
+}
+
+/*Main function*/
+
+func main() {
+
+	KeyGen = MakeKeyGenerator()
+	testNSCTOB(99)
+	/*Hardness = 99
+	i, _ := rand.Int(rand.Reader, big.NewInt(191919191916843213))
+	seed := Hash(i)
+
+	Client1 := makeClient()
+	Client2 := makeClient()
+	Client3 := makeClient()
+	Client4 := makeClient()
+	Client5 := makeClient()
+	Client6 := makeClient()
+	Client7 := makeClient()
+	Client8 := makeClient()
+	Client9 := makeClient()
+	Client10 := makeClient()
+
+	ledger := make(map[string]int)
+	ledger[Client1.PublicKey] = 1000000
+	ledger[Client2.PublicKey] = 1000000
+	ledger[Client3.PublicKey] = 1000000
+	ledger[Client4.PublicKey] = 1000000
+	ledger[Client5.PublicKey] = 1000000
+	ledger[Client6.PublicKey] = 1000000
+	ledger[Client7.PublicKey] = 1000000
+	ledger[Client8.PublicKey] = 1000000
+	ledger[Client9.PublicKey] = 1000000
+	ledger[Client10.PublicKey] = 1000000
+
+	GBlock := Block{BlockNumber: 1, Seed: seed, Ledger: ledger, Signature: ""}
+	d, n := SplitKey(Client1.PrivateKey)
+	GBlock.Signature = signBlock(GBlock, d, n)
+	halt := time.Millisecond * 250
+	go Client1.StartNetwork(GBlock)
+	time.Sleep(halt)
+	go Client2.ConnectToNetwork(Client1.IPandPort)
+	time.Sleep(halt)
+	go Client3.ConnectToNetwork(Client1.IPandPort)
+	time.Sleep(halt)
+	go Client4.ConnectToNetwork(Client1.IPandPort)
+	time.Sleep(halt)
+	go Client5.ConnectToNetwork(Client1.IPandPort)
+	time.Sleep(halt)
+	go Client6.ConnectToNetwork(Client1.IPandPort)
+	time.Sleep(halt)
+	go Client7.ConnectToNetwork(Client1.IPandPort)
+	time.Sleep(halt)
+	go Client8.ConnectToNetwork(Client1.IPandPort)
+	time.Sleep(halt)
+	go Client9.ConnectToNetwork(Client1.IPandPort)
+	time.Sleep(halt)
+	go Client10.ConnectToNetwork(Client1.IPandPort)
+	time.Sleep(time.Second)
+	startingTime := time.Now().Add(time.Second)
+
+	go Client1.ParticipateInLottery(startingTime)
+	go Client2.ParticipateInLottery(startingTime)
+	go Client3.ParticipateInLottery(startingTime)
+	go Client4.ParticipateInLottery(startingTime)
+	go Client5.ParticipateInLottery(startingTime)
+	go Client6.ParticipateInLottery(startingTime)
+	go Client7.ParticipateInLottery(startingTime)
+	go Client8.ParticipateInLottery(startingTime)
+	go Client9.ParticipateInLottery(startingTime)
+	go Client10.ParticipateInLottery(startingTime)
+	time.Sleep(time.Minute)
+	fmt.Println(Client1.ChainDepth(Client1.LastBlock))
+	fmt.Println(Client2.ChainDepth(Client2.LastBlock))
+	fmt.Println(Client3.ChainDepth(Client3.LastBlock))
+	fmt.Println(Client4.ChainDepth(Client4.LastBlock))*/
 }
 
 /****************************/
@@ -495,17 +565,9 @@ func (C *Client) StartNetwork(GBlock Block) {
 	C.PrintFromClient("Starting new network")
 	C.peers = append(C.peers, C.IPandPort)
 	C.ledger.Accounts = GBlock.Ledger
-	key := HashBlock(GBlock)
-	C.blocks[key] = GBlock
+	C.blocks["Genesis"] = GBlock
 	C.seed = GBlock.Seed
-	fmt.Println("i am client 1 this is my ipandport:", C.IPandPort)
-	go C.Listen(ln)
-	time.Sleep(time.Second * 5)
-	C.PrintFromClient("i sent the genesis block")
-	mess := Message{Msgtype: "Genesis Block", Transaction: SignedTransaction{}, Block: GBlock, BlockSender: C.IPandPort}
-	C.Broadcast(mess)
-	for {
-	}
+	C.Listen(ln)
 }
 
 func (C *Client) ConnectToNetwork(IPAndPort string) {
@@ -527,6 +589,9 @@ func (C *Client) ConnectToNetwork(IPAndPort string) {
 		if err != nil {
 			panic(err)
 		}
+		C.blocks["Genesis"] = msg.Block
+		C.ledger.Accounts = msg.Block.Ledger
+		C.seed = msg.Block.Seed
 		ln := C.StartListen()
 		C.peers = append(C.peers, msg.Peers...)
 		C.peers = append(C.peers, C.IPandPort)
@@ -597,8 +662,7 @@ func (C *Client) Listen(ln net.Listener) {
 		}
 		switch msg.Msgtype {
 		case "Requesting Peers":
-			peers := Message{Peers: C.peers, Transaction: SignedTransaction{}, Block: Block{}}
-
+			peers := Message{Peers: C.peers, Transaction: SignedTransaction{}, Block: C.blocks["Genesis"]}
 			err = enc.Encode(&peers)
 			if err != nil {
 				panic(err)
@@ -606,7 +670,6 @@ func (C *Client) Listen(ln net.Listener) {
 		case "Connection":
 			C.conns.Set(msg.IPandPort, conn, enc, dec, msg.PublicKey)
 			pk := Message{IPandPort: C.IPandPort, PublicKey: C.PublicKey}
-
 			err = enc.Encode(&pk)
 			if err != nil {
 				panic(err)
@@ -642,21 +705,6 @@ func (C *Client) HandleConnection(gc GobConn) {
 				C.pendingTransactions.Transactions = append(C.pendingTransactions.Transactions, transaction)
 				C.pendingTransactions.lock.Unlock()
 				C.Broadcast(msg)
-			}
-
-		case "Genesis Block": // broadcaster ikke men burde nok gøre det.
-			block := msg.Block
-			pk := C.conns.m[msg.BlockSender].PublicKey
-			e, n := SplitKey(pk)
-			blockverified := verifyblock(block, e, n)
-			if blockverified {
-				C.ledger.Accounts = block.Ledger
-				key := HashBlock(block)
-				C.blocks[key] = block
-				C.seed = block.Seed
-				C.PrintFromClient("genesisblock recieved")
-			} else {
-				panic("unable to verify genesis block")
 			}
 		case "Broadcast Block": // potentielt noget bøvl ift hvornår blocks bliver broadcastet videre: (overvej block exists metode )
 			block := msg.Block
