@@ -110,16 +110,57 @@ type Message struct {
 }
 
 // primary test method
-func testNSCTOB(Hardness int) {
+func testNSCTOB(hardness int) {
+	Hardness = hardness
+	i, _ := rand.Int(rand.Reader, big.NewInt(191919191916843213))
+	seed := Hash(i)
+	clients := createClients()
+	ledger := createLedger(clients)
+	GBlock := Block{BlockNumber: 1, Seed: seed, Ledger: ledger, Signature: ""}
 
+	d, n := SplitKey(clients[0].PrivateKey)
+	GBlock.Signature = signBlock(GBlock, d, n)
+	go clients[0].StartNetwork(GBlock)
+	time.Sleep(time.Millisecond * 250)
+	ip := clients[0].IPandPort
+	for key := range clients[0:] {
+		time.Sleep(time.Millisecond * 250)
+		go clients[key].ConnectToNetwork(ip)
+	}
+
+	startingTime := time.Now().Add(time.Second * 2)
+	for key := range clients {
+		go clients[key].ParticipateInLottery(startingTime)
+	}
+	time.Sleep(time.Minute)
+	for key := range clients {
+		fmt.Println(clients[key].ChainDepth(clients[key].LastBlock))
+	}
+}
+
+func createClients() []*Client {
+	clients := []*Client{}
+	for i := 1; i < 10; i++ {
+		clients = append(clients, makeClient())
+	}
+	return clients
+}
+
+func createLedger(clients []*Client) map[string]int {
+	ledger := make(map[string]int)
+	for key := range clients {
+		ledger[clients[key].PublicKey] = 1000000
+	}
+	return ledger
 }
 
 /*Main function*/
 
 func main() {
-	Hardness = 99
 
 	KeyGen = MakeKeyGenerator()
+	//testNSCTOB(99)
+	Hardness = 99
 	i, _ := rand.Int(rand.Reader, big.NewInt(191919191916843213))
 	seed := Hash(i)
 
@@ -459,7 +500,7 @@ func (C *Client) StartNetwork(GBlock Block) {
 	C.seed = GBlock.Seed
 	fmt.Println("i am client 1 this is my ipandport:", C.IPandPort)
 	go C.Listen(ln)
-	time.Sleep(time.Second * 3)
+	time.Sleep(time.Second * 5)
 	C.PrintFromClient("i sent the genesis block")
 	mess := Message{Msgtype: "Genesis Block", Transaction: SignedTransaction{}, Block: GBlock, BlockSender: C.IPandPort}
 	C.Broadcast(mess)
